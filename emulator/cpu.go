@@ -1,5 +1,7 @@
 package emulator
 
+import "fmt"
+
 // CPU state
 type CPU struct {
 	// The program counter register
@@ -10,6 +12,9 @@ type CPU struct {
 	Regs [32]uint32
 	// Memory interface
 	Inter *Interconnect
+
+	// COP0 register 12: Status Register
+	SR uint32
 }
 
 // Creates a new CPU state
@@ -78,6 +83,12 @@ func (cpu *CPU) DecodeAndExecute(instruction Instruction) {
 		cpu.OpAddIU(instruction)
 	case 0b000010: // Jump
 		cpu.OpJ(instruction)
+	case 0b010000: // Coprocessor 0 opcode
+		cpu.OpCOP0(instruction)
+	case 0b000101: // Branch if Not Equal
+		cpu.OpBNE(instruction)
+	case 0b001000: // Add Immediate Unsigned and check for overflow
+		cpu.OpADDI(instruction)
 	default:
 		panicFmt("cpu: unhandled instruction 0x%x", instruction)
 	}
@@ -103,6 +114,12 @@ func (cpu *CPU) OpORI(instruction Instruction) {
 
 // Store Word
 func (cpu *CPU) OpSW(instruction Instruction) {
+	if cpu.SR&0x10000 != 0 {
+		// cache is isolated, ignore write
+		fmt.Println("cpu: ignoring store while cache is isolated")
+		return
+	}
+
 	i := instruction.ImmSE()
 	t := instruction.T()
 	s := instruction.S()
@@ -111,6 +128,31 @@ func (cpu *CPU) OpSW(instruction Instruction) {
 	cpu.Store32(addr, cpu.Reg(t))
 }
 
+// Branch to immediate value `offset`
+func (cpu *CPU) Branch(offset uint32) {
+	// offset immediates are always shifted two places to the right since `PC`
+	// addresses have to be aligned on 32 bits at all times
+	offset <<= 2
+
+	pc := cpu.PC
+	pc += offset
+	// we need to compensate for the hardcoded `cpu.PC += 4` in `RunNextInstruction`
+	pc -= 4
+	cpu.PC = pc
+}
+
+// Branch if Not Equal
+func (cpu *CPU) OpBNE(instruction Instruction) {
+	i := instruction.ImmSE()
+	s := instruction.S()
+	t := instruction.T()
+
+	if cpu.Reg(s) != cpu.Reg(t) {
+		cpu.Branch(i)
+	}
+}
+
+// Shift Left Logical
 func (cpu *CPU) OpSLL(instruction Instruction) {
 	i := instruction.Shift()
 	t := instruction.T()
@@ -147,16 +189,43 @@ func (cpu *CPU) OpOR(instruction Instruction) {
 	cpu.SetReg(d, v)
 }
 
+// Coprocessor 0 opcode
 func (cpu *CPU) OpCOP0(instruction Instruction) {
-	todo()
-	/*
-	switch instruction.COPOpcode() {
+	switch instruction.S() {
 	case 0b00100:
-		cpu.OPMTC0(instruction)
+		cpu.OpMTC0(instruction)
 	default:
 		panicFmt("unhandled cop0 instruction 0x%x", instruction)
 	}
-	*/
+}
+
+func (cpu *CPU) OpMTC0(instruction Instruction) {
+	cpuR := instruction.T()
+	copR := instruction.D()
+
+	v := cpu.Reg(cpuR)
+
+	switch copR {
+	case 12:
+		cpu.SR = v
+	default:
+		panicFmt("unhandled cop0 register 0x%x", copR)
+	}
+}
+
+// Add Immediate Unsigned and check for overflow
+func (cpu *CPU) OpADDI(instruction Instruction) {
+	i := int32(instruction.ImmSE())
+	t := instruction.T()
+	s := instruction.S()
+
+	si := int32(cpu.Reg(s))
+	v, err := add32Overflow(si, i)
+	if err != nil {
+		panic("ADDI overflow")
+	}
+
+	cpu.SetReg(t, uint32(v))
 }
 
 // Returns the register value at `index`. The first register is always zero
