@@ -10,7 +10,8 @@ import (
 
 func main() {
 	bios := loadBios()
-	inter := emulator.NewInterconnect(bios)
+	ram := emulator.NewRAM()
+	inter := emulator.NewInterconnect(bios, ram)
 	cpu := emulator.NewCPU(inter)
 
 	for {

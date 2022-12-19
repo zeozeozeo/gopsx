@@ -10,6 +10,12 @@ type CPU struct {
 	NextInstruction Instruction
 	// General purpose registers. The first value must always be 0
 	Regs [32]uint32
+	// 2nd set of registers to emulate the load delay slot correctly. They
+	// contain the output of the current instruction
+	OutRegs [32]uint32
+	// Load initiated by the current instruction. The first value is the register
+	// index, the second value is the value
+	Load [2]uint32
 	// Memory interface
 	Inter *Interconnect
 
@@ -48,7 +54,23 @@ func (cpu *CPU) RunNextInstruction() {
 
 	// increment PC to point to the next instruction (all instructions are 32 bit long)
 	cpu.PC += 4 // wraps around: 0xfffffffc + 4 = 0
+
+	// execute the pending load (if any, otherwise it will load $zero, which is a NOP)
+	// `cpu.SetReg` only works on `cpu.OutRegs`, so this operation won't be visible by
+	// the next instruction
+	reg, val := cpu.Load[0], cpu.Load[1]
+	cpu.SetReg(reg, val)
+
+	// we reset the load to target register 0 for the next instruction
+	cpu.Load[0] = 0
+	cpu.Load[1] = 0
+
 	cpu.DecodeAndExecute(instruction)
+
+	// copy the output registers as input for the next instruction
+	// FIXME: this is copying 128 bytes of registers for each instruction,
+	//        there could be a better way to do this
+	cpu.Regs = cpu.OutRegs
 }
 
 // Returns a 32bit little endian value at `addr`. Panics if the address does not exist
@@ -56,8 +78,14 @@ func (cpu *CPU) Load32(addr uint32) uint32 {
 	return cpu.Inter.Load32(addr)
 }
 
+// Store 32 bit value into memory
 func (cpu *CPU) Store32(addr, val uint32) {
 	cpu.Inter.Store32(addr, val)
+}
+
+// Store 16 bit value into memory
+func (cpu *CPU) Store16(addr uint32, val uint16) {
+	cpu.Inter.Store16(addr, val)
 }
 
 // Decodes and executes an instruction. Panics if the instruction is unhandled
@@ -76,6 +104,10 @@ func (cpu *CPU) DecodeAndExecute(instruction Instruction) {
 			cpu.OpSLL(instruction)
 		case 0b100101: // Bitwise OR
 			cpu.OpOR(instruction)
+		case 0b101011: // Set on Less Than Unsigned
+			cpu.OpSLTU(instruction)
+		case 0b100001: // Add Unsigned
+			cpu.OpADDU(instruction)
 		default:
 			panicFmt("cpu: unhandled instruction 0x%x", instruction)
 		}
@@ -89,6 +121,10 @@ func (cpu *CPU) DecodeAndExecute(instruction Instruction) {
 		cpu.OpBNE(instruction)
 	case 0b001000: // Add Immediate Unsigned and check for overflow
 		cpu.OpADDI(instruction)
+	case 0b100011: // Load Word
+		cpu.OpLW(instruction)
+	case 0b101001:
+		cpu.OpSH(instruction)
 	default:
 		panicFmt("cpu: unhandled instruction 0x%x", instruction)
 	}
@@ -116,7 +152,7 @@ func (cpu *CPU) OpORI(instruction Instruction) {
 func (cpu *CPU) OpSW(instruction Instruction) {
 	if cpu.SR&0x10000 != 0 {
 		// cache is isolated, ignore write
-		fmt.Println("cpu: ignoring store while cache is isolated")
+		fmt.Println("cpu (sw): ignoring store while cache is isolated")
 		return
 	}
 
@@ -206,8 +242,16 @@ func (cpu *CPU) OpMTC0(instruction Instruction) {
 	v := cpu.Reg(cpuR)
 
 	switch copR {
-	case 12:
+	case 3, 5, 6, 7, 9, 11: // breakpoints registers
+		if v != 0 {
+			panicFmt("unhandled write of 0x%x to cop0r%d", v, copR)
+		}
+	case 12: // status register
 		cpu.SR = v
+	case 13: // cause register
+		if v != 0 {
+			panicFmt("unhandled write of 0x%x to CAUSE register", v)
+		}
 	default:
 		panicFmt("unhandled cop0 register 0x%x", copR)
 	}
@@ -228,6 +272,66 @@ func (cpu *CPU) OpADDI(instruction Instruction) {
 	cpu.SetReg(t, uint32(v))
 }
 
+// Load Word
+func (cpu *CPU) OpLW(instruction Instruction) {
+	if cpu.SR&0x10000 != 0 {
+		// cache is isolated, ignore write
+		fmt.Println("cpu (lw): ignoring store while cache is isolated")
+		return
+	}
+
+	i := instruction.ImmSE()
+	t := instruction.T()
+	s := instruction.S()
+
+	addr := cpu.Reg(s) + i
+
+	// put the load in the delay slot
+	cpu.Load[0] = t
+	cpu.Load[1] = cpu.Load32(addr)
+}
+
+// Set on Less Than Unsigned
+func (cpu *CPU) OpSLTU(instruction Instruction) {
+	d := instruction.D()
+	s := instruction.S()
+	t := instruction.T()
+
+	// set register d to 1 if register s is smaller than register t
+	// TODO: check if this is correct
+	var v uint32
+	if cpu.Reg(s) < cpu.Reg(t) {
+		v = 1
+	}
+	cpu.SetReg(d, v)
+}
+
+// Add Unsigned
+func (cpu *CPU) OpADDU(instruction Instruction) {
+	s := instruction.S()
+	t := instruction.T()
+	d := instruction.D()
+
+	v := cpu.Reg(s) + cpu.Reg(t)
+	cpu.SetReg(d, v)
+}
+
+// Store Halfword
+func (cpu *CPU) OpSH(instruction Instruction) {
+	if cpu.SR&0x10000 != 0 {
+		fmt.Println("cpu (sh): ignoring store while cache is isolated")
+		return
+	}
+
+	i := instruction.ImmSE()
+	t := instruction.T()
+	s := instruction.S()
+
+	addr := cpu.Reg(s) + i
+	v := cpu.Reg(t)
+	cpu.Store16(addr, uint16(v))
+}
+
 // Returns the register value at `index`. The first register is always zero
 func (cpu *CPU) Reg(index uint32) uint32 {
 	return cpu.Regs[index]
@@ -235,7 +339,7 @@ func (cpu *CPU) Reg(index uint32) uint32 {
 
 // Sets the value at the `index` register and sets the first register to zero
 func (cpu *CPU) SetReg(index, val uint32) {
-	cpu.Regs[index] = val
+	cpu.OutRegs[index] = val
 	// R0 should always remain 0, we can't change it
-	cpu.Regs[0] = 0
+	cpu.OutRegs[0] = 0
 }

@@ -1,11 +1,16 @@
 package emulator
 
 var (
-	BIOS_RANGE  = NewRange(0xbfc00000, BIOS_SIZE) // The range of the BIOS in the system memory
-	MEM_CONTROL = NewRange(0x1f801000, 36)        // Memory latency and expansion mapping
+	// The range of the BIOS in the system memory
+	BIOS_RANGE = NewRange(0x1fc00000, BIOS_SIZE)
+	// Memory latency and expansion mapping (also known as SYSCONTROL)
+	MEM_CONTROL = NewRange(0x1f801000, 36)
 	// Register that has something to do with RAM configuration, configured by the BIOS
-	RAM_SIZE      = NewRange(0x1f801060, 4)
-	CACHE_CONTROL = NewRange(0xfffe0130, 4) // Cache control register
+	RAM_SIZE = NewRange(0x1f801060, 4)
+	// Cache control register, full address since it's in KSEG2
+	CACHE_CONTROL = NewRange(0xfffe0130, 4)
+	// RAM
+	RAM_RANGE = NewRange(0x00000000, RAM_ALLOC_SIZE)
 )
 
 type Range struct {
