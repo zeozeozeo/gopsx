@@ -21,15 +21,20 @@ type CPU struct {
 
 	// COP0 register 12: Status Register
 	SR uint32
+	// HI register for division remainder and multiplication high result
+	Hi uint32
+	// LO register for division quotient and multiplication low result
+	Lo uint32
 }
 
 // Creates a new CPU state
 func NewCPU(inter *Interconnect) *CPU {
-
 	cpu := &CPU{
 		PC:              0xbfc00000,       // PC reset value at the beginning of the BIOS
 		NextInstruction: Instruction(0x0), // NOP
 		Inter:           inter,
+		Hi:              0xdeadbeef, // junk
+		Lo:              0xdeadbeef, // junk
 	}
 
 	// initialize registers to 0..32 (the values are not initialized on reset,
@@ -61,7 +66,7 @@ func (cpu *CPU) RunNextInstruction() {
 	reg, val := cpu.Load[0], cpu.Load[1]
 	cpu.SetReg(reg, val)
 
-	// we reset the load to target register 0 for the next instruction
+	// reset the load to target register 0 for the next instruction
 	cpu.Load[0] = 0
 	cpu.Load[1] = 0
 
@@ -78,6 +83,11 @@ func (cpu *CPU) Load32(addr uint32) uint32 {
 	return cpu.Inter.Load32(addr)
 }
 
+// Returns the byte at `addr`
+func (cpu *CPU) Load8(addr uint32) byte {
+	return cpu.Inter.Load8(addr)
+}
+
 // Store 32 bit value into memory
 func (cpu *CPU) Store32(addr, val uint32) {
 	cpu.Inter.Store32(addr, val)
@@ -86,6 +96,11 @@ func (cpu *CPU) Store32(addr, val uint32) {
 // Store 16 bit value into memory
 func (cpu *CPU) Store16(addr uint32, val uint16) {
 	cpu.Inter.Store16(addr, val)
+}
+
+// Store 32 bit value into memory
+func (cpu *CPU) Store8(addr uint32, val uint8) {
+	cpu.Inter.Store8(addr, val)
 }
 
 // Decodes and executes an instruction. Panics if the instruction is unhandled
@@ -102,12 +117,30 @@ func (cpu *CPU) DecodeAndExecute(instruction Instruction) {
 		switch instruction.Subfunction() {
 		case 0b000000: // Shift Left Logical
 			cpu.OpSLL(instruction)
+		case 0b000010: // Shift Right Logical
+			cpu.OpSRL(instruction)
 		case 0b100101: // Bitwise OR
 			cpu.OpOR(instruction)
+		case 0b100100: // Bitwise AND
+			cpu.OpAND(instruction)
 		case 0b101011: // Set on Less Than Unsigned
 			cpu.OpSLTU(instruction)
 		case 0b100001: // Add Unsigned
 			cpu.OpADDU(instruction)
+		case 0b001000: // Jump Register
+			cpu.OpJR(instruction)
+		case 0b100000: // Add and generate an exception on overflow
+			cpu.OpADD(instruction)
+		case 0b001001: // Jump And Link Register
+			cpu.OpJALR(instruction)
+		case 0b100011: // Subtract Unsigned
+			cpu.OpSUBU(instruction)
+		case 0b000011: // Shift Right Arithmetic
+			cpu.OpSRA(instruction)
+		case 0b011010: // Divide (signed)
+			cpu.OpDIV(instruction)
+		case 0b010010: // Move From LO
+			cpu.OpMFLO(instruction)
 		default:
 			panicFmt("cpu: unhandled instruction 0x%x", instruction)
 		}
@@ -123,8 +156,30 @@ func (cpu *CPU) DecodeAndExecute(instruction Instruction) {
 		cpu.OpADDI(instruction)
 	case 0b100011: // Load Word
 		cpu.OpLW(instruction)
-	case 0b101001:
+	case 0b101001: // Store Halfword
 		cpu.OpSH(instruction)
+	case 0b000011: // Jump And Link
+		cpu.OpJAL(instruction)
+	case 0b001100: // Bitwise And Immediate
+		cpu.OpANDI(instruction)
+	case 0b101000: // Store Byte
+		cpu.OpSB(instruction)
+	case 0b100000: // Load Byte
+		cpu.OpLB(instruction)
+	case 0b000100: // Branch if Equal
+		cpu.OpBEQ(instruction)
+	case 0b000111: // Branch if Greater Than Zero
+		cpu.OpBGTZ(instruction)
+	case 0b000110: // Branch if Less than or Equal to Zero
+		cpu.OpBLEZ(instruction)
+	case 0b100100: // Load Byte Unsigned
+		cpu.OpLBU(instruction)
+	case 0b000001: // BGEZ, BLTZ, BGEZAL, BLTZAL
+		cpu.OpBXX(instruction)
+	case 0b001010: // Set if Less Than Immediate (signed)
+		cpu.OpSLTI(instruction)
+	case 0b001011: // Set if Less Than Immediate Unsigned
+		cpu.OpSLTIU(instruction)
 	default:
 		panicFmt("cpu: unhandled instruction 0x%x", instruction)
 	}
@@ -146,6 +201,14 @@ func (cpu *CPU) OpORI(instruction Instruction) {
 	t := instruction.T()
 	s := instruction.S()
 	cpu.SetReg(t, cpu.Reg(s)|i)
+}
+
+// Bitwise And Immediate
+func (cpu *CPU) OpANDI(instruction Instruction) {
+	i := instruction.Imm()
+	t := instruction.T()
+	s := instruction.S()
+	cpu.SetReg(t, cpu.Reg(s)&i)
 }
 
 // Store Word
@@ -212,6 +275,7 @@ func (cpu *CPU) OpJ(instruction Instruction) {
 	i := instruction.ImmJump()
 	// the instructions must be aligned to a 32 bit boundary, so really
 	// J encodes 28 bits of the target address (shifted by 2)
+	// TODO: shouldn't we just call Branch()?
 	cpu.PC = (cpu.PC & 0xf0000000) | (i << 2)
 }
 
@@ -225,13 +289,25 @@ func (cpu *CPU) OpOR(instruction Instruction) {
 	cpu.SetReg(d, v)
 }
 
+// Bitwise AND
+func (cpu *CPU) OpAND(instruction Instruction) {
+	d := instruction.D()
+	s := instruction.S()
+	t := instruction.T()
+
+	v := cpu.Reg(s) & cpu.Reg(t)
+	cpu.SetReg(d, v)
+}
+
 // Coprocessor 0 opcode
 func (cpu *CPU) OpCOP0(instruction Instruction) {
 	switch instruction.S() {
-	case 0b00100:
+	case 0b00000: // Move From Coprocessor 0
+		cpu.OpMFC0(instruction)
+	case 0b00100: // Move To Coprocessor 0
 		cpu.OpMTC0(instruction)
 	default:
-		panicFmt("unhandled cop0 instruction 0x%x", instruction)
+		panicFmt("cpu: unhandled cop0 instruction 0x%x", instruction)
 	}
 }
 
@@ -244,16 +320,16 @@ func (cpu *CPU) OpMTC0(instruction Instruction) {
 	switch copR {
 	case 3, 5, 6, 7, 9, 11: // breakpoints registers
 		if v != 0 {
-			panicFmt("unhandled write of 0x%x to cop0r%d", v, copR)
+			panicFmt("cpu: unhandled write of 0x%x to cop0r%d", v, copR)
 		}
 	case 12: // status register
 		cpu.SR = v
 	case 13: // cause register
 		if v != 0 {
-			panicFmt("unhandled write of 0x%x to CAUSE register", v)
+			panicFmt("cpu: unhandled write of 0x%x to CAUSE register", v)
 		}
 	default:
-		panicFmt("unhandled cop0 register 0x%x", copR)
+		panicFmt("cpu: unhandled cop0 register 0x%x", copR)
 	}
 }
 
@@ -266,7 +342,7 @@ func (cpu *CPU) OpADDI(instruction Instruction) {
 	si := int32(cpu.Reg(s))
 	v, err := add32Overflow(si, i)
 	if err != nil {
-		panic("ADDI overflow")
+		panic("cpu: ADDI overflow")
 	}
 
 	cpu.SetReg(t, uint32(v))
@@ -330,6 +406,272 @@ func (cpu *CPU) OpSH(instruction Instruction) {
 	addr := cpu.Reg(s) + i
 	v := cpu.Reg(t)
 	cpu.Store16(addr, uint16(v))
+}
+
+// Jump And Link
+func (cpu *CPU) OpJAL(instruction Instruction) {
+	// store return address in $ra ($31)
+	ra := cpu.PC
+	cpu.SetReg(31, ra)
+	cpu.OpJ(instruction)
+}
+
+// Store Byte
+func (cpu *CPU) OpSB(instruction Instruction) {
+	if cpu.SR&0x10000 != 0 {
+		fmt.Println("cpu (sb): ignoring store while cache is isolated")
+		return
+	}
+
+	i := instruction.ImmSE()
+	t := instruction.T()
+	s := instruction.S()
+
+	addr := cpu.Reg(s) + i
+	cpu.Store8(addr, uint8(cpu.Reg(t)))
+}
+
+// Jump Register
+func (cpu *CPU) OpJR(instruction Instruction) {
+	// TODO: i don't think this works correctly
+	s := instruction.S()
+	cpu.PC = cpu.Reg(s)
+}
+
+// Jump And Link Register
+func (cpu *CPU) OpJALR(instruction Instruction) {
+	// TODO: i don't think this works correctly
+	d := instruction.D()
+	s := instruction.S()
+
+	ra := cpu.PC
+	// store return address in `d`
+	cpu.SetReg(d, ra)
+	cpu.PC = cpu.Reg(s)
+}
+
+// Load Byte
+func (cpu *CPU) OpLB(instruction Instruction) {
+	i := instruction.ImmSE()
+	t := instruction.T()
+	s := instruction.S()
+
+	addr := cpu.Reg(s) + i
+
+	// cast to int8 to force sign extension
+	v := int8(cpu.Load8(addr))
+
+	// put the load in the delay slot
+	cpu.Load[0] = t
+	cpu.Load[1] = uint32(v)
+}
+
+// Branch if Equal
+func (cpu *CPU) OpBEQ(instruction Instruction) {
+	i := instruction.ImmSE()
+	s := instruction.S()
+	t := instruction.T()
+
+	if cpu.Reg(s) == cpu.Reg(t) {
+		cpu.Branch(i)
+	}
+}
+
+// Move From Coprocessor 0
+func (cpu *CPU) OpMFC0(instruction Instruction) {
+	cpuR := instruction.T()
+	copR := instruction.D()
+
+	var v uint32
+	switch copR {
+	case 12:
+		v = cpu.SR
+	case 13: // cause register
+		panic("cpu: unhandled read from CAUSE register")
+	default:
+		panicFmt("cpu: unhandled read from cop0r%d", copR)
+	}
+
+	cpu.Load[0] = cpuR
+	cpu.Load[1] = v
+}
+
+// Add and generate an exception on overflow
+func (cpu *CPU) OpADD(instruction Instruction) {
+	s := instruction.S()
+	t := instruction.T()
+	d := instruction.D()
+
+	si := int32(cpu.Reg(s))
+	ti := int32(cpu.Reg(t))
+
+	v, err := add32Overflow(si, ti)
+	if err != nil {
+		panic("cpu: ADD overflow")
+	}
+
+	cpu.SetReg(d, uint32(v))
+}
+
+// Branch if Greater Than Zero
+func (cpu *CPU) OpBGTZ(instruction Instruction) {
+	i := instruction.ImmSE()
+	s := instruction.S()
+
+	// the comparison is done in signed integers
+	v := int32(cpu.Reg(s))
+	if v > 0 {
+		cpu.Branch(i)
+	}
+}
+
+// Branch if Less than or Equal to Zero
+func (cpu *CPU) OpBLEZ(instruction Instruction) {
+	i := instruction.ImmSE()
+	s := instruction.S()
+
+	// the comparison is done in signed integers
+	v := int32(cpu.Reg(s))
+	if v <= 0 {
+		cpu.Branch(i)
+	}
+}
+
+// Load Byte Unsigned
+func (cpu *CPU) OpLBU(instruction Instruction) {
+	i := instruction.ImmSE()
+	t := instruction.T()
+	s := instruction.S()
+
+	addr := cpu.Reg(s) + i
+	v := cpu.Load8(addr)
+
+	// put the load in the delay slot
+	cpu.Load[0] = t
+	cpu.Load[1] = uint32(v)
+}
+
+// BGEZ, BLTZ, BGEZAL, BLTZAL. Bits 16 and 20 are used to figure out which
+// one to use
+func (cpu *CPU) OpBXX(instruction Instruction) {
+	i := instruction.ImmSE()
+	s := instruction.S()
+
+	instU := uint32(instruction)
+	isBGEZ := ((instU >> 16) & 1)
+	isLink := (instU>>17)&0xf == 8
+	v := int32(cpu.Reg(s))
+
+	// test "less than zero"
+	var test uint32
+	if v < 0 {
+		test = 1
+	}
+
+	// if the test is "greater than or equal to zero" we need to negate
+	// the comparison above since ("a >= 0" <=> "!(a < 0)"). the XOR will
+	// take care of that
+	test ^= isBGEZ
+
+	if isLink {
+		ra := cpu.PC
+		// store return address in R31
+		cpu.SetReg(31, ra)
+	}
+	if test != 0 {
+		cpu.Branch(i)
+	}
+}
+
+// Set if Less Than Immediate (signed)
+func (cpu *CPU) OpSLTI(instruction Instruction) {
+	i := int32(instruction.ImmSE())
+	s := instruction.S()
+	t := instruction.T()
+
+	if int32(cpu.Reg(s)) < i {
+		cpu.SetReg(t, 1)
+	} else {
+		cpu.SetReg(t, 0)
+	}
+}
+
+// Set if Less Than Immediate Unsigned
+func (cpu *CPU) OpSLTIU(instruction Instruction) {
+	i := instruction.ImmSE()
+	s := instruction.S()
+	t := instruction.T()
+
+	if cpu.Reg(s) < i {
+		cpu.SetReg(t, 1)
+	} else {
+		cpu.SetReg(t, 0)
+	}
+}
+
+// Subtract Unsigned
+func (cpu *CPU) OpSUBU(instruction Instruction) {
+	s := instruction.S()
+	t := instruction.T()
+	d := instruction.D()
+
+	v := cpu.Reg(s) - cpu.Reg(t)
+	cpu.SetReg(d, v)
+}
+
+// Shift Right Arithmetic
+func (cpu *CPU) OpSRA(instruction Instruction) {
+	i := instruction.Shift()
+	t := instruction.T()
+	d := instruction.D()
+
+	v := int32(cpu.Reg(t)) >> i
+	cpu.SetReg(d, uint32(v))
+}
+
+// Divide (signed)
+func (cpu *CPU) OpDIV(instruction Instruction) {
+	s := instruction.S()
+	t := instruction.T()
+
+	n := int32(cpu.Reg(s))
+	d := int32(cpu.Reg(t))
+
+	if d == 0 {
+		// division by zero, results are bogus
+		cpu.Hi = uint32(n)
+
+		if n >= 0 {
+			cpu.Lo = 0xffffffff
+		} else {
+			cpu.Lo = 1
+		}
+	} else if uint32(n) == 0x80000000 && d == -1 {
+		// result is not representable in 32 bits
+
+		// signed integer
+		cpu.Hi = 0
+		cpu.Lo = 0x80000000
+	} else {
+		cpu.Hi = uint32(n % d)
+		cpu.Lo = uint32(n / d)
+	}
+}
+
+// Move From LO
+func (cpu *CPU) OpMFLO(instruction Instruction) {
+	d := instruction.D()
+	cpu.SetReg(d, cpu.Lo)
+}
+
+// Shift Right Logical
+func (cpu *CPU) OpSRL(instruction Instruction) {
+	i := instruction.Shift()
+	t := instruction.T()
+	d := instruction.D()
+
+	v := cpu.Reg(t) >> i
+	cpu.SetReg(d, v)
 }
 
 // Returns the register value at `index`. The first register is always zero

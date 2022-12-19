@@ -11,6 +11,14 @@ var (
 	CACHE_CONTROL = NewRange(0xfffe0130, 4)
 	// RAM
 	RAM_RANGE = NewRange(0x00000000, RAM_ALLOC_SIZE)
+	// SPU (Sound Processing Unit)
+	SPU_RANGE = NewRange(0x1f801c00, 640)
+	// Expansion region 1
+	EXPANSION_1 = NewRange(0x1f000000, 512*1024)
+	// Expansion region 2
+	EXPANSION_2 = NewRange(0x1f802000, 66)
+	// Interrupt Control registers (status and mask)
+	IRQ_CONTROL = NewRange(0x1f801070, 8)
 )
 
 type Range struct {

@@ -31,10 +31,14 @@ func LoadBIOS(r io.Reader) (*BIOS, error) {
 // not the absolute address used by the CPU, instead it is an offset in the
 // BIOS memory range
 func (bios *BIOS) Load32(offset uint32) uint32 {
-	// TODO: are these casts correct? (11: Loading the BIOS)
 	b0 := uint32(bios.Data[offset+0])
 	b1 := uint32(bios.Data[offset+1])
 	b2 := uint32(bios.Data[offset+2])
 	b3 := uint32(bios.Data[offset+3])
 	return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+}
+
+// Fetch byte at `offset`
+func (bios *BIOS) Load8(offset uint32) byte {
+	return bios.Data[offset]
 }

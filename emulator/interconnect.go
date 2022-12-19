@@ -37,7 +37,7 @@ func NewInterconnect(bios *BIOS, ram *RAM) *Interconnect {
 func (inter *Interconnect) Load32(addr uint32) uint32 {
 	addr = MaskRegion(addr)
 	if addr%4 != 0 {
-		panicFmt("interconnect: unaligned Load32 address 0x%x", addr)
+		panicFmt("interconnect: unaligned Load32 address 0x%x\n", addr)
 	}
 
 	// handle ranges
@@ -53,6 +53,24 @@ func (inter *Interconnect) Load32(addr uint32) uint32 {
 	return 0 // shouldn't reach here, but the linter still wants me to put this
 }
 
+func (inter *Interconnect) Load8(addr uint32) byte {
+	addr = MaskRegion(addr)
+
+	if BIOS_RANGE.Contains(addr) {
+		return inter.Bios.Load8(BIOS_RANGE.Offset(addr))
+	}
+
+	if EXPANSION_1.Contains(addr) {
+		// no expansion implemented
+		fmt.Printf("interconnect: ignoring Load8 at 0x%x, no expansion implemented\n", addr)
+		return 0xff
+	}
+
+	panicFmt("interconnect: unhandled Load8 at address 0x%x", addr)
+	return 0
+}
+
+// Store 32 bit `val` into `addr`
 func (inter *Interconnect) Store32(addr, val uint32) {
 	addr = MaskRegion(addr)
 	if addr%4 != 0 {
@@ -72,7 +90,7 @@ func (inter *Interconnect) Store32(addr, val uint32) {
 			}
 		default:
 			// FIXME: add proper logging for this
-			fmt.Println("interconnect: unhandled write to MEMCONTROL register")
+			fmt.Printf("interconnect: unhandled write to MEMCONTROL register 0x%x\n", addr)
 		}
 		return
 	}
@@ -83,13 +101,13 @@ func (inter *Interconnect) Store32(addr, val uint32) {
 	// it's safe to just ignore it
 	if RAM_SIZE.Contains(addr) {
 		// FIXME: add proper logging for this
-		fmt.Println("interconnect: ignoring write to RAMSIZE register")
+		fmt.Printf("interconnect: ignoring write to RAMSIZE register 0x%x\n", addr)
 		return
 	}
 
 	// handle CACHECONTROL (FIXME: stub)
 	if CACHE_CONTROL.Contains(addr) {
-		fmt.Println("interconnect: unhandled write to CACHECONTROL register")
+		fmt.Printf("interconnect: unhandled write to CACHECONTROL register 0x%x\n", addr)
 		return
 	}
 
@@ -99,16 +117,45 @@ func (inter *Interconnect) Store32(addr, val uint32) {
 		return
 	}
 
+	// IRQCONTROL
+	if IRQ_CONTROL.Contains(addr) {
+		fmt.Printf(
+			"interconnect: ignoring IRQCONTROL: 0x%x <- 0x%x",
+			IRQ_CONTROL.Offset(addr), val,
+		)
+		return
+	}
+
 	panicFmt("interconnect: unhandled Store32 of 0x%x into address 0x%x", val, addr)
 }
 
+// Store 16 bit `val` into `addr`
 func (inter *Interconnect) Store16(addr uint32, val uint16) {
 	addr = MaskRegion(addr)
 	if addr%2 != 0 {
 		panicFmt("interconnect: unaligned Store16 into address 0x%x", addr)
 	}
 
+	if SPU_RANGE.Contains(addr) {
+		fmt.Printf("interconnect: ignoring write to SPU register 0x%d\n", addr)
+		return
+	}
+
 	panicFmt("interconnect: unhandled Store16 into address 0x%x", addr)
+}
+
+func (inter *Interconnect) Store8(addr uint32, val uint8) {
+	addr = MaskRegion(addr)
+
+	if EXPANSION_2.Contains(addr) {
+		fmt.Printf(
+			"interconnect: ignoring write to expansion 2 register 0x%x\n",
+			EXPANSION_2.Offset(addr),
+		)
+		return
+	}
+
+	panicFmt("interconnect: unhandled store8 into address 0x%x", addr)
 }
 
 func MaskRegion(addr uint32) uint32 {
