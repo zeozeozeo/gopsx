@@ -106,9 +106,14 @@ func (cpu *CPU) RunNextInstruction() {
 	cpu.Regs = cpu.OutRegs
 }
 
-// Returns a 32bit little endian value at `addr`. Panics if the address does not exist
+// Returns a 32bit little endian value at `addr`
 func (cpu *CPU) Load32(addr uint32) uint32 {
 	return cpu.Inter.Load32(addr)
+}
+
+// Returns a 16bit little endian value at `addr`
+func (cpu *CPU) Load16(addr uint32) uint16 {
+	return cpu.Inter.Load16(addr)
 }
 
 // Returns the byte at `addr`
@@ -181,6 +186,24 @@ func (cpu *CPU) DecodeAndExecute(instruction Instruction) {
 			cpu.OpMTLO(instruction)
 		case 0b010001: // Move To HI
 			cpu.OpMTHI(instruction)
+		case 0b000100: // Shift Left Logical Variable
+			cpu.OpSLLV(instruction)
+		case 0b100111: // Bitwise Not Or
+			cpu.OpNOR(instruction)
+		case 0b000111: // Shift Right Arithmetic Variable
+			cpu.OpSRAV(instruction)
+		case 0b000110: // Shift Right Logical Variable
+			cpu.OpSRLV(instruction)
+		case 0b011001: // Multiply Unsigned
+			cpu.OpMULTU(instruction)
+		case 0b100110: // Bitwise eXclusive OR
+			cpu.OpXOR(instruction)
+		case 0b001101: // Break
+			cpu.OpBreak()
+		case 0b011000: // Multiply (signed)
+			cpu.OpMULT(instruction)
+		case 0b100010: // Subtract and check for signed overflow
+			cpu.OpSUB(instruction)
 		default:
 			panicFmt("cpu: unhandled instruction 0x%x", instruction)
 		}
@@ -220,8 +243,44 @@ func (cpu *CPU) DecodeAndExecute(instruction Instruction) {
 		cpu.OpSLTI(instruction)
 	case 0b001011: // Set if Less Than Immediate Unsigned
 		cpu.OpSLTIU(instruction)
+	case 0b100101: // Load Halfword Unsigned
+		cpu.OpLHU(instruction)
+	case 0b100001: // Load Halfword (signed)
+		cpu.OpLH(instruction)
+	case 0b001110: // Bitwise eXclusive Or Immediate
+		cpu.OpXORI(instruction)
+	case 0b010001: // Coprocessor 1 opcode (does not exist on the PlayStation)
+		cpu.OpCOP1()
+	case 0b010011: // Coprocessor 3 opcode (does not exist on the PlayStation)
+		cpu.OpCOP3()
+	case 0b010010: // Coprocessor 2 opcode (GTE)
+		cpu.OpCOP2(instruction)
+	case 0b100010: // Load Word Left
+		cpu.OpLWL(instruction)
+	case 0b100110: // Load Word Right
+		cpu.OpLWR(instruction)
+	case 0b101010: // Store Word Left
+		cpu.OpSWL(instruction)
+	case 0b101110: // Store Word Right
+		cpu.OpSWR(instruction)
+	case 0b110000: // Load Word in Coprocessor 0 (not supported)
+		cpu.OpLWC0()
+	case 0b110001: // Load Word in Coprocessor 1 (not supported)
+		cpu.OpLWC1()
+	case 0b110010: // Load Word in Coprocessor 2
+		cpu.OpLWC2(instruction)
+	case 0b110011: // Load Word in Coprocessor 3 (not supported)
+		cpu.OpLWC3()
+	case 0b111000: // Store Word in Coprocessor 0 (not supported)
+		cpu.OpSWC0()
+	case 0b111001: // Store Word in Coprocessor 1 (not supported)
+		cpu.OpSWC1()
+	case 0b111010: // Store Word in Coprocessor 2
+		cpu.OpSWC2(instruction)
+	case 0b111011: // Store Word in Coprocessor 3 (not supported)
+		cpu.OpSWC3()
 	default:
-		panicFmt("cpu: unhandled instruction 0x%x", instruction)
+		cpu.OpIllegal(instruction)
 	}
 }
 
@@ -330,7 +389,6 @@ func (cpu *CPU) OpOR(instruction Instruction) {
 
 	v := cpu.Reg(s) | cpu.Reg(t)
 	cpu.SetReg(d, v)
-	cpu.BranchOccured = true
 }
 
 // Bitwise AND
@@ -860,4 +918,346 @@ func (cpu *CPU) OpRFE(instruction Instruction) {
 	mode := cpu.SR & 0x3f
 	cpu.SR = uint32(int32(cpu.SR) & ^0x3f)
 	cpu.SR |= mode >> 2
+}
+
+// Load Halfword Unsigned
+func (cpu *CPU) OpLHU(instruction Instruction) {
+	i := instruction.ImmSE()
+	t := instruction.T()
+	s := instruction.S()
+
+	addr := cpu.Reg(s) + i
+	// address must be 16 bit aligned
+	if addr%2 == 0 {
+		v := cpu.Load16(addr)
+
+		// put the load in the delay slot
+		cpu.Load[0] = t
+		cpu.Load[1] = uint32(v)
+	} else {
+		cpu.Exception(EXCEPTION_LOAD_ADDRESS_ERROR)
+	}
+}
+
+// Shift Left Logical Variable
+func (cpu *CPU) OpSLLV(instruction Instruction) {
+	d := instruction.D()
+	s := instruction.S()
+	t := instruction.T()
+
+	// shift amount is truncated to 5 bits
+	v := cpu.Reg(t) << (cpu.Reg(s) & 0x1f)
+	cpu.SetReg(d, v)
+}
+
+// Load Halfword (signed)
+func (cpu *CPU) OpLH(instruction Instruction) {
+	i := instruction.ImmSE()
+	t := instruction.T()
+	s := instruction.S()
+
+	addr := cpu.Reg(s) + i
+
+	// cast to int16 to force sign extension
+	v := int16(cpu.Load16(addr))
+
+	// put the load in the delay slot
+	cpu.Load[0] = t
+	cpu.Load[1] = uint32(v)
+}
+
+// Bitwise Not Or
+func (cpu *CPU) OpNOR(instruction Instruction) {
+	d := instruction.D()
+	s := instruction.S()
+	t := instruction.T()
+
+	v := ^(cpu.Reg(s) | cpu.Reg(t))
+	cpu.SetReg(d, v)
+}
+
+// Shift Right Arithmetic Variable
+func (cpu *CPU) OpSRAV(instruction Instruction) {
+	d := instruction.D()
+	s := instruction.S()
+	t := instruction.T()
+
+	// shift amount is truncated to 5 bits
+	v := int32(cpu.Reg(t)) >> (cpu.Reg(s) & 0x1f)
+	cpu.SetReg(d, uint32(v))
+}
+
+// Shift Right Logical Variable
+func (cpu *CPU) OpSRLV(instruction Instruction) {
+	d := instruction.D()
+	s := instruction.S()
+	t := instruction.T()
+
+	// shift amount is truncated to 5 bits
+	v := cpu.Reg(t) >> (cpu.Reg(s) & 0x1f)
+	cpu.SetReg(d, v)
+}
+
+// Multiply Unsigned
+func (cpu *CPU) OpMULTU(instruction Instruction) {
+	s := instruction.S()
+	t := instruction.T()
+
+	a := uint64(cpu.Reg(s))
+	b := uint64(cpu.Reg(t))
+	v := a * b
+
+	cpu.Hi = uint32(v >> 32)
+	cpu.Lo = uint32(v)
+}
+
+// Bitwise eXclusive OR
+func (cpu *CPU) OpXOR(instruction Instruction) {
+	d := instruction.D()
+	s := instruction.S()
+	t := instruction.T()
+
+	v := cpu.Reg(s) ^ cpu.Reg(t)
+	cpu.SetReg(d, v)
+}
+
+// Break
+func (cpu *CPU) OpBreak() {
+	cpu.Exception(EXCEPTION_BREAK)
+}
+
+// Multiply (signed)
+func (cpu *CPU) OpMULT(instruction Instruction) {
+	s := instruction.S()
+	t := instruction.T()
+
+	a := int64(int32(cpu.Reg(s)))
+	b := int64(int32(cpu.Reg(t)))
+
+	v := uint64(a * b)
+	cpu.Hi = uint32(v >> 32)
+	cpu.Lo = uint32(v)
+}
+
+// Subtract and check for signed overflow
+func (cpu *CPU) OpSUB(instruction Instruction) {
+	s := instruction.S()
+	t := instruction.T()
+	d := instruction.D()
+
+	si := int32(cpu.Reg(s))
+	ti := int32(cpu.Reg(t))
+
+	v, err := sub32Overflow(si, ti)
+	if err != nil {
+		cpu.Exception(EXCEPTION_OVERFLOW)
+	} else {
+		cpu.SetReg(d, uint32(v))
+	}
+}
+
+// Bitwise eXclusive Or Immediate
+func (cpu *CPU) OpXORI(instruction Instruction) {
+	i := instruction.Imm()
+	t := instruction.T()
+	s := instruction.S()
+
+	v := cpu.Reg(s) ^ i
+	cpu.SetReg(t, v)
+}
+
+// Coprocessor 1 opcode (does not exist on the PlayStation)
+func (cpu *CPU) OpCOP1() {
+	cpu.Exception(EXCEPTION_COPROCESSOR_ERROR)
+}
+
+// Coprocessor 3 opcode (does not exist on the PlayStation)
+func (cpu *CPU) OpCOP3() {
+	cpu.Exception(EXCEPTION_COPROCESSOR_ERROR)
+}
+
+// Coprocessor 2 opcode (GTE)
+func (cpu *CPU) OpCOP2(instruction Instruction) {
+	panicFmt("cpu: unhandled GTE instruction %d", instruction)
+}
+
+// Load Word Left (little-endian only implementation)
+func (cpu *CPU) OpLWL(instruction Instruction) {
+	i := instruction.ImmSE()
+	t := instruction.T()
+	s := instruction.S()
+
+	addr := cpu.Reg(s) + i
+
+	// this instruction bypasses the load delay restriction;
+	// it will merge the new contents with the value currently
+	// being loaded if needed
+	curV := cpu.OutRegs[t]
+
+	// next, load the *aligned* word containing the first addressed byte
+	// TODO: maybe there is a way to do this without casts?
+	alignedAddr := uint32(int64(addr) & ^3)
+	alignedWord := cpu.Load32(alignedAddr)
+
+	// depending on the address alignment, fetch 1, 2, 3 or 4 *most*
+	// significant bytes and put them in the target register
+	var v uint32
+	switch addr & 3 {
+	case 0:
+		v = (curV & 0x00ffffff) | (alignedWord << 24)
+	case 1:
+		v = (curV & 0x0000ffff) | (alignedWord << 16)
+	case 2:
+		v = (curV & 0x000000ff) | (alignedWord << 8)
+	case 3:
+		v = 0 | (alignedWord << 0)
+	default:
+		panic("cpu (lwl): unreachable")
+	}
+
+	// put the load in the delay slot
+	cpu.Load[0] = t
+	cpu.Load[1] = v
+}
+
+// Load Word Right (little-endian only implementation)
+func (cpu *CPU) OpLWR(instruction Instruction) {
+	i := instruction.ImmSE()
+	t := instruction.T()
+	s := instruction.S()
+
+	addr := cpu.Reg(s) + i
+
+	// this instruction bypasses the load delay restriction;
+	// it will merge the new contents with the value currently
+	// being loaded if needed
+	curV := cpu.OutRegs[t]
+
+	// next, load the *aligned* word containing the first addressed byte
+	// TODO: maybe there is a way to do this without casts?
+	alignedAddr := uint32(int64(addr) & ^3)
+	alignedWord := cpu.Load32(alignedAddr)
+
+	// depending on the address alignment, fetch 1, 2, 3 or 4 *least*
+	// significant bytes and put them in the target register
+	var v uint32
+	switch addr & 3 {
+	case 0:
+		v = 0 | (alignedWord >> 0)
+	case 1:
+		v = (curV & 0xff000000) | (alignedWord >> 8)
+	case 2:
+		v = (curV & 0xffff0000) | (alignedWord >> 16)
+	case 3:
+		v = (curV & 0xffffff00) | (alignedWord >> 24)
+	default:
+		panic("cpu (lwr): unreachable")
+	}
+
+	// put the load in the delay slot
+	cpu.Load[0] = t
+	cpu.Load[1] = v
+}
+
+// Store Word Left (little-endian only implementation)
+func (cpu *CPU) OpSWL(instruction Instruction) {
+	i := instruction.ImmSE()
+	t := instruction.T()
+	s := instruction.S()
+
+	addr := cpu.Reg(s) + i
+	v := cpu.Reg(t)
+
+	alignedAddr := uint32(int64(addr) & ^3)
+	// load the current value for the aligned word at the target address
+	curMem := cpu.Load32(alignedAddr)
+
+	var mem uint32
+	switch addr & 3 {
+	case 0:
+		mem = (curMem & 0xffffff00) | (v >> 24)
+	case 1:
+		mem = (curMem & 0xffff0000) | (v >> 16)
+	case 2:
+		mem = (curMem & 0xff000000) | (v >> 8)
+	case 3:
+		mem = 0 | (v >> 0)
+	default:
+		panic("cpu (swl): unreachable")
+	}
+	cpu.Store32(alignedAddr, mem)
+}
+
+// Store Word Right (little-endian only implementation)
+func (cpu *CPU) OpSWR(instruction Instruction) {
+	i := instruction.ImmSE()
+	t := instruction.T()
+	s := instruction.S()
+
+	addr := cpu.Reg(s) + i
+	v := cpu.Reg(t)
+
+	alignedAddr := uint32(int64(addr) & ^3)
+	// load the current value for the aligned word at the target address
+	curMem := cpu.Load32(alignedAddr)
+
+	var mem uint32
+	switch addr & 3 {
+	case 0:
+		mem = 0 | (v << 0)
+	case 1:
+		mem = (curMem & 0x000000ff) | (v << 8)
+	case 2:
+		mem = (curMem & 0x0000ffff) | (v << 16)
+	case 3:
+		mem = (curMem & 0x00ffffff) | (v << 24)
+	default:
+		panic("cpu (swr): unreachable")
+	}
+	cpu.Store32(alignedAddr, mem)
+}
+
+// Load Word in Coprocessor 0 (not supported)
+func (cpu *CPU) OpLWC0() {
+	cpu.Exception(EXCEPTION_COPROCESSOR_ERROR)
+}
+
+// Load Word in Coprocessor 1 (not supported)
+func (cpu *CPU) OpLWC1() {
+	cpu.Exception(EXCEPTION_COPROCESSOR_ERROR)
+}
+
+// Load Word in Coprocessor 2
+func (cpu *CPU) OpLWC2(instruction Instruction) {
+	panicFmt("unhandled GTE LWC %d", instruction)
+}
+
+// Load Word in Coprocessor 3 (not supported)
+func (cpu *CPU) OpLWC3() {
+	cpu.Exception(EXCEPTION_COPROCESSOR_ERROR)
+}
+
+// Store Word in Coprocessor 0 (not supported)
+func (cpu *CPU) OpSWC0() {
+	cpu.Exception(EXCEPTION_COPROCESSOR_ERROR)
+}
+
+// Store Word in Coprocessor 1 (not supported)
+func (cpu *CPU) OpSWC1() {
+	cpu.Exception(EXCEPTION_COPROCESSOR_ERROR)
+}
+
+// Store Word in Coprocessor 2
+func (cpu *CPU) OpSWC2(instruction Instruction) {
+	panicFmt("unhandled GTE SWC %d", instruction)
+}
+
+// Store Word in Coprocessor 3 (not supported)
+func (cpu *CPU) OpSWC3() {
+	cpu.Exception(EXCEPTION_COPROCESSOR_ERROR)
+}
+
+func (cpu *CPU) OpIllegal(instruction Instruction) {
+	fmt.Printf("cpu: illegal instruction %d\n", instruction)
+	cpu.Exception(EXCEPTION_ILLEGAL_INSTRUCTION)
 }

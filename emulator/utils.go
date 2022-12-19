@@ -3,7 +3,6 @@ package emulator
 import (
 	"errors"
 	"fmt"
-	"math"
 )
 
 var errOverflow = errors.New("integer overflow")
@@ -20,15 +19,19 @@ func todo() {
 */
 
 // Adds two signed integers and checks for overflow
-func add32Overflow(left, right int32) (int32, error) {
-	if right > 0 {
-		if left > math.MaxInt32-right {
-			return 0, errOverflow
-		}
-	} else {
-		if left < math.MinInt32-right {
-			return 0, errOverflow
-		}
+func add32Overflow(a, b int32) (int32, error) {
+	c := a + b
+	if (c > a) == (b > 0) {
+		return c, nil
 	}
-	return left + right, nil
+	return c, errOverflow
+}
+
+// Subtracts two signed integers and checks for overflow
+func sub32Overflow(a, b int32) (int32, error) {
+	c := a - b
+	if (c < a) == (b > 0) {
+		return c, nil
+	}
+	return c, errOverflow
 }

@@ -21,6 +21,10 @@ var (
 	IRQ_CONTROL = NewRange(0x1f801070, 8)
 	// Timer registers
 	TIMERS_RANGE = NewRange(0x1f801100, 0x30)
+	// Direct Memory Access registers
+	DMA_RANGE = NewRange(0x1f801080, 0x80)
+	// GPU
+	GPU_RANGE = NewRange(0x1f801810, 8)
 )
 
 type Range struct {
