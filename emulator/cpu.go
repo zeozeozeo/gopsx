@@ -141,6 +141,12 @@ func (cpu *CPU) DecodeAndExecute(instruction Instruction) {
 			cpu.OpDIV(instruction)
 		case 0b010010: // Move From LO
 			cpu.OpMFLO(instruction)
+		case 0b010000: // Move From HI
+			cpu.OpMFHI(instruction)
+		case 0b011011: // Divide Unsigned
+			cpu.OpDIVU(instruction)
+		case 0b101010: // Set on Less Than (signed)
+			cpu.OpSLT(instruction)
 		default:
 			panicFmt("cpu: unhandled instruction 0x%x", instruction)
 		}
@@ -658,10 +664,34 @@ func (cpu *CPU) OpDIV(instruction Instruction) {
 	}
 }
 
+// Divide Unsigned
+func (cpu *CPU) OpDIVU(instruction Instruction) {
+	s := instruction.S()
+	t := instruction.T()
+
+	n := cpu.Reg(s)
+	d := cpu.Reg(t)
+
+	if d == 0 {
+		// division by zero, results are bogus
+		cpu.Hi = n
+		cpu.Lo = 0xffffffff
+	} else {
+		cpu.Hi = n % d
+		cpu.Lo = n / d
+	}
+}
+
 // Move From LO
 func (cpu *CPU) OpMFLO(instruction Instruction) {
 	d := instruction.D()
 	cpu.SetReg(d, cpu.Lo)
+}
+
+// Move From HI
+func (cpu *CPU) OpMFHI(instruction Instruction) {
+	d := instruction.D()
+	cpu.SetReg(d, cpu.Hi)
 }
 
 // Shift Right Logical
@@ -671,6 +701,20 @@ func (cpu *CPU) OpSRL(instruction Instruction) {
 	d := instruction.D()
 
 	v := cpu.Reg(t) >> i
+	cpu.SetReg(d, v)
+}
+
+// Set on Less Than (signed)
+func (cpu *CPU) OpSLT(instruction Instruction) {
+	d := instruction.D()
+	s := instruction.S()
+	t := instruction.T()
+
+	var v uint32
+	if int32(cpu.Reg(s)) < int32(cpu.Reg(t)) {
+		v = 1
+	}
+
 	cpu.SetReg(d, v)
 }
 

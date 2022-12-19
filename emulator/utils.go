@@ -13,9 +13,11 @@ func panicFmt(format string, a ...interface{}) {
 	panic(fmt.Sprintf(format, a...))
 }
 
+/*
 func todo() {
 	panic("TODO")
 }
+*/
 
 // Adds two signed integers and checks for overflow
 func add32Overflow(left, right int32) (int32, error) {

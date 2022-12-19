@@ -47,6 +47,13 @@ func (inter *Interconnect) Load32(addr uint32) uint32 {
 	if RAM_RANGE.Contains(addr) {
 		return inter.Ram.Load32(RAM_RANGE.Offset(addr))
 	}
+	if IRQ_CONTROL.Contains(addr) {
+		fmt.Printf(
+			"interconnect: ignoring IRQCONTROL read at offset 0x%x\n",
+			IRQ_CONTROL.Offset(addr),
+		)
+		return 0
+	}
 
 	// couldn't load address, panic
 	panicFmt("interconnect: unhandled Load32 at address 0x%x", addr)
@@ -120,7 +127,7 @@ func (inter *Interconnect) Store32(addr, val uint32) {
 	// IRQCONTROL
 	if IRQ_CONTROL.Contains(addr) {
 		fmt.Printf(
-			"interconnect: ignoring IRQCONTROL: 0x%x <- 0x%x",
+			"interconnect: ignoring IRQCONTROL: 0x%x <- 0x%x\n",
 			IRQ_CONTROL.Offset(addr), val,
 		)
 		return
@@ -138,6 +145,13 @@ func (inter *Interconnect) Store16(addr uint32, val uint16) {
 
 	if SPU_RANGE.Contains(addr) {
 		fmt.Printf("interconnect: ignoring write to SPU register 0x%d\n", addr)
+		return
+	}
+	if TIMERS_RANGE.Contains(addr) {
+		fmt.Printf(
+			"interconnect: ignoring write to timer register at offset 0x%x\n",
+			TIMERS_RANGE.Offset(addr),
+		)
 		return
 	}
 

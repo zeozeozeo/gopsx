@@ -19,6 +19,8 @@ var (
 	EXPANSION_2 = NewRange(0x1f802000, 66)
 	// Interrupt Control registers (status and mask)
 	IRQ_CONTROL = NewRange(0x1f801070, 8)
+	// Timer registers
+	TIMERS_RANGE = NewRange(0x1f801100, 0x30)
 )
 
 type Range struct {
