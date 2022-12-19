@@ -26,16 +26,22 @@ func (ram *RAM) Load32(offset uint32) uint32 {
 }
 
 // Fetches the byte at `offset`
-func (ram *RAM) Load8(offset uint32, val byte) byte {
+func (ram *RAM) Load8(offset uint32) byte {
 	return ram.Data[offset]
 }
 
 // Store the 32 bit little endian word `val` into `offset`
 func (ram *RAM) Store32(offset, val uint32) {
 	ram.Data[offset+0] = byte(val)
-	ram.Data[offset+0] = byte(val >> 8)
-	ram.Data[offset+0] = byte(val >> 16)
-	ram.Data[offset+0] = byte(val >> 24)
+	ram.Data[offset+1] = byte(val >> 8)
+	ram.Data[offset+2] = byte(val >> 16)
+	ram.Data[offset+3] = byte(val >> 24)
+}
+
+// Stores a 16 bit little endian value into `offset`
+func (ram *RAM) Store16(offset uint32, val uint16) {
+	ram.Data[offset+0] = byte(val)
+	ram.Data[offset+1] = byte(val >> 8)
 }
 
 // Sets the byte at `offset`

@@ -4,10 +4,13 @@ import "fmt"
 
 // CPU state
 type CPU struct {
-	// The program counter register
+	// The program counter register: points to the next instruction
 	PC uint32
-	// Next instruction to be executed, used to simulate the branch delay slot
-	NextInstruction Instruction
+	// Next value for the PC, used to simulate the branch delay slot
+	NextPC uint32
+	// Address of the instruction currently being executed. Used for
+	// setting EPC in exceptions
+	CurrentPC uint32
 	// General purpose registers. The first value must always be 0
 	Regs [32]uint32
 	// 2nd set of registers to emulate the load delay slot correctly. They
@@ -18,6 +21,11 @@ type CPU struct {
 	Load [2]uint32
 	// Memory interface
 	Inter *Interconnect
+	// Set by the current instruction if a branch occured and the next instruction
+	// will be in the delay slot
+	BranchOccured bool
+	// Set if the current instruction executes in the delay slot
+	DelaySlot bool
 
 	// COP0 register 12: Status Register
 	SR uint32
@@ -25,16 +33,22 @@ type CPU struct {
 	Hi uint32
 	// LO register for division quotient and multiplication low result
 	Lo uint32
+	// Cop0 register 13: Cause Register
+	Cause uint32
+	// Cop0 register 14: EPC
+	Epc uint32
 }
 
 // Creates a new CPU state
 func NewCPU(inter *Interconnect) *CPU {
+	var pc uint32 = 0xbfc00000 // PC reset value at the beginning of the BIOS
 	cpu := &CPU{
-		PC:              0xbfc00000,       // PC reset value at the beginning of the BIOS
-		NextInstruction: Instruction(0x0), // NOP
-		Inter:           inter,
-		Hi:              0xdeadbeef, // junk
-		Lo:              0xdeadbeef, // junk
+		PC:     pc,
+		NextPC: pc + 4,
+		// NextInstruction: Instruction(0x0), // NOP
+		Inter: inter,
+		Hi:    0xdeadbeef, // junk
+		Lo:    0xdeadbeef, // junk
 	}
 
 	// initialize registers to 0..32 (the values are not initialized on reset,
@@ -49,16 +63,26 @@ func NewCPU(inter *Interconnect) *CPU {
 
 // Runs the instruction at the program counter and increments it
 func (cpu *CPU) RunNextInstruction() {
+	// save the address of the current instruction to save in EPC in case of an exception
 	pc := cpu.PC
+	cpu.CurrentPC = pc
 
-	// use previously loaded instruction
-	instruction := cpu.NextInstruction
+	// FIXME: there's no need to check if PC is incorectly aligned for each instruction,
+	//        instead we could make jump and branch instructions not capable of setting
+	//        unaligned PC addresses
+	if cpu.CurrentPC%4 != 0 {
+		// PC is not correctly aligned
+		fmt.Println("cpu: PC is not correctly aligned!")
+		cpu.Exception(EXCEPTION_LOAD_ADDRESS_ERROR)
+		return
+	}
 
 	// fetch instruction at PC
-	cpu.NextInstruction = Instruction(cpu.Load32(pc))
+	instruction := Instruction(cpu.Load32(pc))
 
 	// increment PC to point to the next instruction (all instructions are 32 bit long)
-	cpu.PC += 4 // wraps around: 0xfffffffc + 4 = 0
+	cpu.PC = cpu.NextPC
+	cpu.NextPC += 4
 
 	// execute the pending load (if any, otherwise it will load $zero, which is a NOP)
 	// `cpu.SetReg` only works on `cpu.OutRegs`, so this operation won't be visible by
@@ -69,6 +93,10 @@ func (cpu *CPU) RunNextInstruction() {
 	// reset the load to target register 0 for the next instruction
 	cpu.Load[0] = 0
 	cpu.Load[1] = 0
+
+	// if the last instruction was a branch then we're in the delay slot
+	cpu.DelaySlot = cpu.BranchOccured
+	cpu.BranchOccured = false
 
 	cpu.DecodeAndExecute(instruction)
 
@@ -147,11 +175,17 @@ func (cpu *CPU) DecodeAndExecute(instruction Instruction) {
 			cpu.OpDIVU(instruction)
 		case 0b101010: // Set on Less Than (signed)
 			cpu.OpSLT(instruction)
+		case 0b001100: // System Call
+			cpu.OpSyscall()
+		case 0b010011: // Move To LO
+			cpu.OpMTLO(instruction)
+		case 0b010001: // Move To HI
+			cpu.OpMTHI(instruction)
 		default:
 			panicFmt("cpu: unhandled instruction 0x%x", instruction)
 		}
 	case 0b001001: // Add Immediate Unsigned
-		cpu.OpAddIU(instruction)
+		cpu.OpADDIU(instruction)
 	case 0b000010: // Jump
 		cpu.OpJ(instruction)
 	case 0b010000: // Coprocessor 0 opcode
@@ -221,7 +255,7 @@ func (cpu *CPU) OpANDI(instruction Instruction) {
 func (cpu *CPU) OpSW(instruction Instruction) {
 	if cpu.SR&0x10000 != 0 {
 		// cache is isolated, ignore write
-		fmt.Println("cpu (sw): ignoring store while cache is isolated")
+		// fmt.Println("cpu (sw): ignoring store while cache is isolated")
 		return
 	}
 
@@ -230,7 +264,14 @@ func (cpu *CPU) OpSW(instruction Instruction) {
 	s := instruction.S()
 
 	addr := cpu.Reg(s) + i
-	cpu.Store32(addr, cpu.Reg(t))
+	v := cpu.Reg(t)
+
+	// address must be 32 bit aligned
+	if addr%4 == 0 {
+		cpu.Store32(addr, v)
+	} else {
+		cpu.Exception(EXCEPTION_STORE_ADDRESS_ERROR)
+	}
 }
 
 // Branch to immediate value `offset`
@@ -238,12 +279,8 @@ func (cpu *CPU) Branch(offset uint32) {
 	// offset immediates are always shifted two places to the right since `PC`
 	// addresses have to be aligned on 32 bits at all times
 	offset <<= 2
-
-	pc := cpu.PC
-	pc += offset
-	// we need to compensate for the hardcoded `cpu.PC += 4` in `RunNextInstruction`
-	pc -= 4
-	cpu.PC = pc
+	cpu.NextPC = cpu.PC + offset
+	cpu.BranchOccured = true
 }
 
 // Branch if Not Equal
@@ -268,7 +305,7 @@ func (cpu *CPU) OpSLL(instruction Instruction) {
 }
 
 // Add Immediate Unsigned
-func (cpu *CPU) OpAddIU(instruction Instruction) {
+func (cpu *CPU) OpADDIU(instruction Instruction) {
 	i := instruction.ImmSE()
 	t := instruction.T()
 	s := instruction.S()
@@ -281,8 +318,8 @@ func (cpu *CPU) OpJ(instruction Instruction) {
 	i := instruction.ImmJump()
 	// the instructions must be aligned to a 32 bit boundary, so really
 	// J encodes 28 bits of the target address (shifted by 2)
-	// TODO: shouldn't we just call Branch()?
-	cpu.PC = (cpu.PC & 0xf0000000) | (i << 2)
+	cpu.NextPC = (cpu.NextPC & 0xf0000000) | (i << 2)
+	cpu.BranchOccured = true
 }
 
 // Bitwise OR
@@ -293,6 +330,7 @@ func (cpu *CPU) OpOR(instruction Instruction) {
 
 	v := cpu.Reg(s) | cpu.Reg(t)
 	cpu.SetReg(d, v)
+	cpu.BranchOccured = true
 }
 
 // Bitwise AND
@@ -312,6 +350,8 @@ func (cpu *CPU) OpCOP0(instruction Instruction) {
 		cpu.OpMFC0(instruction)
 	case 0b00100: // Move To Coprocessor 0
 		cpu.OpMTC0(instruction)
+	case 0b10000: // Return From Expression
+		cpu.OpRFE(instruction)
 	default:
 		panicFmt("cpu: unhandled cop0 instruction 0x%x", instruction)
 	}
@@ -348,7 +388,8 @@ func (cpu *CPU) OpADDI(instruction Instruction) {
 	si := int32(cpu.Reg(s))
 	v, err := add32Overflow(si, i)
 	if err != nil {
-		panic("cpu: ADDI overflow")
+		cpu.Exception(EXCEPTION_OVERFLOW)
+		return
 	}
 
 	cpu.SetReg(t, uint32(v))
@@ -358,7 +399,7 @@ func (cpu *CPU) OpADDI(instruction Instruction) {
 func (cpu *CPU) OpLW(instruction Instruction) {
 	if cpu.SR&0x10000 != 0 {
 		// cache is isolated, ignore write
-		fmt.Println("cpu (lw): ignoring store while cache is isolated")
+		// fmt.Println("cpu (lw): ignoring store while cache is isolated")
 		return
 	}
 
@@ -368,9 +409,15 @@ func (cpu *CPU) OpLW(instruction Instruction) {
 
 	addr := cpu.Reg(s) + i
 
-	// put the load in the delay slot
-	cpu.Load[0] = t
-	cpu.Load[1] = cpu.Load32(addr)
+	// address must be 32 bit aligned
+	if addr%4 == 0 {
+		v := cpu.Load32(addr)
+		// put the load in the delay slot
+		cpu.Load[0] = t
+		cpu.Load[1] = v
+	} else {
+		cpu.Exception(EXCEPTION_LOAD_ADDRESS_ERROR)
+	}
 }
 
 // Set on Less Than Unsigned
@@ -401,7 +448,7 @@ func (cpu *CPU) OpADDU(instruction Instruction) {
 // Store Halfword
 func (cpu *CPU) OpSH(instruction Instruction) {
 	if cpu.SR&0x10000 != 0 {
-		fmt.Println("cpu (sh): ignoring store while cache is isolated")
+		// fmt.Println("cpu (sh): ignoring store while cache is isolated")
 		return
 	}
 
@@ -410,22 +457,29 @@ func (cpu *CPU) OpSH(instruction Instruction) {
 	s := instruction.S()
 
 	addr := cpu.Reg(s) + i
-	v := cpu.Reg(t)
-	cpu.Store16(addr, uint16(v))
+
+	// address must be 16 bit aligned
+	if addr%2 == 0 {
+		v := cpu.Reg(t)
+		cpu.Store16(addr, uint16(v))
+	} else {
+		cpu.Exception(EXCEPTION_STORE_ADDRESS_ERROR)
+	}
 }
 
 // Jump And Link
 func (cpu *CPU) OpJAL(instruction Instruction) {
 	// store return address in $ra ($31)
 	ra := cpu.PC
-	cpu.SetReg(31, ra)
 	cpu.OpJ(instruction)
+	cpu.SetReg(31, ra)
+	// `cpu.BranchOccured = true` is set by `cpu.OpJ` above
 }
 
 // Store Byte
 func (cpu *CPU) OpSB(instruction Instruction) {
 	if cpu.SR&0x10000 != 0 {
-		fmt.Println("cpu (sb): ignoring store while cache is isolated")
+		// fmt.Println("cpu (sb): ignoring store while cache is isolated")
 		return
 	}
 
@@ -439,9 +493,9 @@ func (cpu *CPU) OpSB(instruction Instruction) {
 
 // Jump Register
 func (cpu *CPU) OpJR(instruction Instruction) {
-	// TODO: i don't think this works correctly
 	s := instruction.S()
-	cpu.PC = cpu.Reg(s)
+	cpu.NextPC = cpu.Reg(s)
+	cpu.BranchOccured = true
 }
 
 // Jump And Link Register
@@ -450,10 +504,12 @@ func (cpu *CPU) OpJALR(instruction Instruction) {
 	d := instruction.D()
 	s := instruction.S()
 
-	ra := cpu.PC
+	ra := cpu.NextPC
+	cpu.NextPC = cpu.Reg(s)
+
 	// store return address in `d`
 	cpu.SetReg(d, ra)
-	cpu.PC = cpu.Reg(s)
+	cpu.BranchOccured = true
 }
 
 // Load Byte
@@ -493,7 +549,9 @@ func (cpu *CPU) OpMFC0(instruction Instruction) {
 	case 12:
 		v = cpu.SR
 	case 13: // cause register
-		panic("cpu: unhandled read from CAUSE register")
+		v = cpu.Cause
+	case 14:
+		v = cpu.Epc
 	default:
 		panicFmt("cpu: unhandled read from cop0r%d", copR)
 	}
@@ -513,7 +571,8 @@ func (cpu *CPU) OpADD(instruction Instruction) {
 
 	v, err := add32Overflow(si, ti)
 	if err != nil {
-		panic("cpu: ADD overflow")
+		cpu.Exception(EXCEPTION_OVERFLOW)
+		return
 	}
 
 	cpu.SetReg(d, uint32(v))
@@ -728,4 +787,77 @@ func (cpu *CPU) SetReg(index, val uint32) {
 	cpu.OutRegs[index] = val
 	// R0 should always remain 0, we can't change it
 	cpu.OutRegs[0] = 0
+}
+
+// Trigger an exception
+func (cpu *CPU) Exception(cause Exception) {
+	// exception handler address depends on the BEV bit
+	var handler uint32
+	if cpu.SR&(1<<22) != 0 {
+		handler = 0xbfc00180
+	} else {
+		handler = 0x80000080
+	}
+
+	// shift bits [5:0] of the SR two places to the left.
+	// those bits are three pairs of Interrupt Enable/User Mode
+	// bits behaving like a stack of 3 entries deep. Entering an
+	// exception pushes a pair of zeroes by left shifting the stack
+	// which disables interrupts and puts the CPU in kernel mode.
+	// The original third entry is discarded (it's up to the kernel
+	// to handle more than two recursive exception levels)
+	mode := cpu.SR & 0x3f
+	cpu.SR = uint32(int32(cpu.SR) & ^0x3f)
+	cpu.SR |= (mode << 2) & 0x3f
+
+	// update CAUSE register with the exception code (bits [6:2])
+	cpu.Cause = uint32(cause) << 2
+
+	// save current instruction address in EPC
+	cpu.Epc = cpu.CurrentPC
+
+	if cpu.DelaySlot {
+		// when an exception occurs in a delay slot, EPC points to
+		// the branch instruction and bit 31 of CAUSE is set
+		cpu.Epc -= 4
+		cpu.Cause |= 1 << 31
+	}
+
+	// exceptions don't have a branch delay, jump directly into
+	// the handler
+	cpu.PC = handler
+	cpu.NextPC = cpu.PC + 4
+}
+
+// System Call
+func (cpu *CPU) OpSyscall() {
+	cpu.Exception(EXCEPTION_SYSCALL)
+}
+
+// Move To LO
+func (cpu *CPU) OpMTLO(instruction Instruction) {
+	s := instruction.S()
+	cpu.Lo = cpu.Reg(s)
+}
+
+// Move To HI
+func (cpu *CPU) OpMTHI(instruction Instruction) {
+	s := instruction.S()
+	cpu.Hi = cpu.Reg(s)
+}
+
+// Return From Expression
+func (cpu *CPU) OpRFE(instruction Instruction) {
+	// there are other instructions with the same encoding, but all
+	// are virtual memory related and the PlayStation doesn't implement
+	// them. Still, we need to make sure we're not running buggy code
+	if instruction&0x3f != 0b010000 {
+		panicFmt("cpu: invalid cop0 rfe instruction 0x%x", instruction)
+	}
+
+	// restore the pre-exception mode by shifting the Interrupt
+	// Enable/User Mode stack back to its original position
+	mode := cpu.SR & 0x3f
+	cpu.SR = uint32(int32(cpu.SR) & ^0x3f)
+	cpu.SR |= mode >> 2
 }

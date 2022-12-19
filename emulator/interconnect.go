@@ -63,10 +63,12 @@ func (inter *Interconnect) Load32(addr uint32) uint32 {
 func (inter *Interconnect) Load8(addr uint32) byte {
 	addr = MaskRegion(addr)
 
+	if RAM_RANGE.Contains(addr) {
+		return inter.Ram.Load8(RAM_RANGE.Offset(addr))
+	}
 	if BIOS_RANGE.Contains(addr) {
 		return inter.Bios.Load8(BIOS_RANGE.Offset(addr))
 	}
-
 	if EXPANSION_1.Contains(addr) {
 		// no expansion implemented
 		fmt.Printf("interconnect: ignoring Load8 at 0x%x, no expansion implemented\n", addr)
@@ -96,35 +98,23 @@ func (inter *Interconnect) Store32(addr, val uint32) {
 				panicFmt("interconnect: bad expansion 2 base address 0x%x", addr)
 			}
 		default:
-			// FIXME: add proper logging for this
 			fmt.Printf("interconnect: unhandled write to MEMCONTROL register 0x%x\n", addr)
 		}
 		return
 	}
 
-	// handle RAMSIZE
-	// the exact purpose of this register is partially unknown, but
-	// it seems to be configuring the memory controller, so hopefully
-	// it's safe to just ignore it
 	if RAM_SIZE.Contains(addr) {
-		// FIXME: add proper logging for this
 		fmt.Printf("interconnect: ignoring write to RAMSIZE register 0x%x\n", addr)
 		return
 	}
-
-	// handle CACHECONTROL (FIXME: stub)
 	if CACHE_CONTROL.Contains(addr) {
 		fmt.Printf("interconnect: unhandled write to CACHECONTROL register 0x%x\n", addr)
 		return
 	}
-
-	// RAM
 	if RAM_RANGE.Contains(addr) {
 		inter.Ram.Store32(RAM_RANGE.Offset(addr), val)
 		return
 	}
-
-	// IRQCONTROL
 	if IRQ_CONTROL.Contains(addr) {
 		fmt.Printf(
 			"interconnect: ignoring IRQCONTROL: 0x%x <- 0x%x\n",
@@ -143,6 +133,10 @@ func (inter *Interconnect) Store16(addr uint32, val uint16) {
 		panicFmt("interconnect: unaligned Store16 into address 0x%x", addr)
 	}
 
+	if RAM_RANGE.Contains(addr) {
+		inter.Ram.Store16(RAM_RANGE.Offset(addr), val)
+		return
+	}
 	if SPU_RANGE.Contains(addr) {
 		fmt.Printf("interconnect: ignoring write to SPU register 0x%d\n", addr)
 		return
@@ -161,6 +155,10 @@ func (inter *Interconnect) Store16(addr uint32, val uint16) {
 func (inter *Interconnect) Store8(addr uint32, val uint8) {
 	addr = MaskRegion(addr)
 
+	if RAM_RANGE.Contains(addr) {
+		inter.Ram.Store8(RAM_RANGE.Offset(addr), val)
+		return
+	}
 	if EXPANSION_2.Contains(addr) {
 		fmt.Printf(
 			"interconnect: ignoring write to expansion 2 register 0x%x\n",
