@@ -67,3 +67,10 @@ func accessSizeToU32(size AccessSize, val interface{}) uint32 {
 		return val.(uint32)
 	}
 }
+
+func oneIfTrue(val bool) uint32 {
+	if val {
+		return 1
+	}
+	return 0
+}
