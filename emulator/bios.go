@@ -42,3 +42,14 @@ func (bios *BIOS) Load32(offset uint32) uint32 {
 func (bios *BIOS) Load8(offset uint32) byte {
 	return bios.Data[offset]
 }
+
+// Loads a value at `offset`
+func (bios *BIOS) Load(offset uint32, size AccessSize) interface{} {
+	var v uint32 = 0
+	sizeI := uint32(size)
+
+	for i := uint32(0); i < sizeI; i++ {
+		v |= uint32(bios.Data[offset+i]) << (i * 8)
+	}
+	return accessSizeU32(size, v)
+}

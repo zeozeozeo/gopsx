@@ -1,6 +1,8 @@
 package emulator
 
-import "fmt"
+import (
+	"fmt"
+)
 
 // Global interconnect. It stores all of the peripherals
 type Interconnect struct {
@@ -32,194 +34,138 @@ func NewInterconnect(bios *BIOS, ram *RAM) *Interconnect {
 	return inter
 }
 
-// Returns a 32bit little endian value at `addr`. Panics
-// if the address does not exist
-func (inter *Interconnect) Load32(addr uint32) uint32 {
+// Load value at `addr`
+func (inter *Interconnect) Load(addr uint32, size AccessSize) interface{} {
 	absAddr := MaskRegion(addr)
-	if addr%4 != 0 {
-		panicFmt("interconnect: unaligned Load32 address 0x%x\n", addr)
-	}
 
-	// handle ranges
-	if BIOS_RANGE.Contains(absAddr) {
-		return inter.Bios.Load32(BIOS_RANGE.Offset(absAddr))
+	if ok, offset := RAM_RANGE.ContainsAndOffset(absAddr); ok {
+		return inter.Ram.Load(offset, size)
 	}
-	if RAM_RANGE.Contains(absAddr) {
-		return inter.Ram.Load32(RAM_RANGE.Offset(absAddr))
+	if ok, offset := BIOS_RANGE.ContainsAndOffset(absAddr); ok {
+		return inter.Bios.Load(offset, size)
 	}
-	if IRQ_CONTROL.Contains(absAddr) {
-		fmt.Printf(
-			"interconnect: ignoring IRQCONTROL read at address 0x%x\n",
-			addr,
-		)
-		return 0
+	if ok, offset := IRQ_CONTROL.ContainsAndOffset(absAddr); ok {
+		fmt.Printf("inter: IRQ control read %d\n", offset)
+		return accessSizeU32(size, 0)
 	}
 	if DMA_RANGE.Contains(absAddr) {
 		fmt.Printf("interconnect: ignoring DMA read at 0x%x\n", addr)
-		return 0
+		return accessSizeU32(size, 0)
 	}
-	if GPU_RANGE.Contains(absAddr) {
-		offset := GPU_RANGE.Offset(absAddr)
-		fmt.Printf("interconnect: GPU read offset 0x%x\n", offset)
+	if ok, offset := GPU_RANGE.ContainsAndOffset(absAddr); ok {
+		fmt.Printf("inter: GPU read offset 0x%x\n", offset)
 		switch offset {
 		// GPUSTAT: set bit 28 to signal that the GPU is ready to recieve
 		// DMA blocks
 		case 4:
-			return 0x10000000
+			return accessSizeU32(size, 0x10000000)
 		}
-		return 0
+		return accessSizeU32(size, 0)
 	}
-
-	// couldn't load address, panic
-	panicFmt("interconnect: unhandled Load32 at address 0x%x", addr)
-	return 0
-}
-
-func (inter *Interconnect) Load16(addr uint32) uint16 {
-	absAddr := MaskRegion(addr)
-	if addr%2 != 0 {
-		panicFmt("interconnect: unaligned Load16 address 0x%x", addr)
+	if ok, offset := TIMERS_RANGE.ContainsAndOffset(absAddr); ok {
+		fmt.Printf("inter: unhandled read from timers register %d\n", offset)
+		return accessSizeU32(size, 0)
 	}
-
 	if SPU_RANGE.Contains(absAddr) {
-		fmt.Printf("interconnect: ignoring read from SPU register at 0x%x\n", addr)
-		return 0
-	}
-	if RAM_RANGE.Contains(absAddr) {
-		return inter.Ram.Load16(RAM_RANGE.Offset(absAddr))
-	}
-	if IRQ_CONTROL.Contains(absAddr) {
-		fmt.Printf("interconnect: IRQ control read 0x%x", IRQ_CONTROL.Offset(absAddr))
-		return 0
-	}
-
-	panicFmt("interconnect: unhandled Load16 at address 0x%x", addr)
-	return 0
-}
-
-func (inter *Interconnect) Load8(addr uint32) byte {
-	absAddr := MaskRegion(addr)
-
-	if RAM_RANGE.Contains(absAddr) {
-		return inter.Ram.Load8(RAM_RANGE.Offset(absAddr))
-	}
-	if BIOS_RANGE.Contains(absAddr) {
-		return inter.Bios.Load8(BIOS_RANGE.Offset(absAddr))
+		fmt.Printf("inter: unhandled read from SPU register 0x%x\n", absAddr)
+		return accessSizeU32(size, 0)
 	}
 	if EXPANSION_1.Contains(absAddr) {
-		// no expansion implemented
-		fmt.Printf("interconnect: ignoring Load8 at 0x%x, no expansion implemented\n", addr)
-		return 0xff
+		fmt.Printf("inter: ignoring read from expansion 1 0x%x\n", absAddr)
+		return accessSizeU32(size, 0)
 	}
 
-	panicFmt("interconnect: unhandled Load8 at address 0x%x", addr)
-	return 0
+	panicFmt("inter: unhandled load at address 0x%x", addr)
+	return accessSizeU32(size, 0)
 }
 
-// Store 32 bit `val` into `addr`
-func (inter *Interconnect) Store32(addr, val uint32) {
+// Write value into `addr`
+func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}) {
 	absAddr := MaskRegion(addr)
-	if addr%4 != 0 {
-		panicFmt("interconnect: unaligned Store32 of 0x%x into address 0x%x", val, addr)
-	}
 
-	// handle MEMCONTROL
+	if ok, offset := RAM_RANGE.ContainsAndOffset(absAddr); ok {
+		inter.Ram.Store(offset, size, val)
+		return
+	}
 	if MEM_CONTROL.Contains(absAddr) {
 		switch MEM_CONTROL.Offset(absAddr) {
 		case 0: // expansion 1 base address
 			if val != 0x1f000000 {
-				panicFmt("interconnect: bad expansion 1 base address 0x%x", addr)
+				panicFmt("inter: bad expansion 1 base address 0x%x", addr)
 			}
 		case 4: // expansion 2 base address
 			if val != 0x1f802000 {
-				panicFmt("interconnect: bad expansion 2 base address 0x%x", addr)
+				panicFmt("inter: bad expansion 2 base address 0x%x", addr)
 			}
 		default:
-			fmt.Printf("interconnect: unhandled write to MEMCONTROL register 0x%x\n", addr)
+			fmt.Printf("inter: unhandled write to MEM_CONTROL register 0x%x\n", addr)
 		}
 		return
 	}
-	if RAM_SIZE.Contains(absAddr) {
-		fmt.Printf("interconnect: ignoring write to RAMSIZE register 0x%x\n", addr)
-		return
-	}
-	if CACHE_CONTROL.Contains(absAddr) {
-		fmt.Printf("interconnect: unhandled write to CACHECONTROL register 0x%x\n", addr)
-		return
-	}
-	if RAM_RANGE.Contains(absAddr) {
-		inter.Ram.Store32(RAM_RANGE.Offset(absAddr), val)
-		return
-	}
-	if IRQ_CONTROL.Contains(absAddr) {
-		fmt.Printf(
-			"interconnect: ignoring IRQCONTROL: 0x%x <- 0x%x\n",
-			IRQ_CONTROL.Offset(absAddr), val,
-		)
+	if ok, offset := IRQ_CONTROL.ContainsAndOffset(addr); ok {
+		fmt.Printf("inter: ignoring IRQCONTROL: 0x%x <- 0x%x\n", offset, val)
 		return
 	}
 	if DMA_RANGE.Contains(absAddr) {
-		fmt.Printf("interconnect: ignoring DMA write 0x%x <- 0x%x\n", addr, val)
+		fmt.Printf("inter: ignoring DMA write 0x%x <- 0x%x\n", addr, val)
 		return
 	}
-	if GPU_RANGE.Contains(absAddr) {
-		fmt.Printf("interconnect: GPU write 0x%x <- 0x%x\n", GPU_RANGE.Offset(absAddr), val)
+	if ok, offset := GPU_RANGE.ContainsAndOffset(absAddr); ok {
+		fmt.Printf("inter: GPU write 0x%x <- 0x%x\n", offset, val)
 		return
 	}
-	if TIMERS_RANGE.Contains(absAddr) {
-		fmt.Printf("unhandled write to timer register %d <- 0x%x", TIMERS_RANGE.Offset(absAddr), val)
-		return
-	}
-
-	panicFmt("interconnect: unhandled Store32 into address 0x%x <- 0x%x\n", addr, val)
-}
-
-// Store 16 bit `val` into `addr`
-func (inter *Interconnect) Store16(addr uint32, val uint16) {
-	absAddr := MaskRegion(addr)
-	if addr%2 != 0 {
-		panicFmt("interconnect: unaligned Store16 into address 0x%x", addr)
-	}
-
-	if RAM_RANGE.Contains(absAddr) {
-		inter.Ram.Store16(RAM_RANGE.Offset(absAddr), val)
+	if ok, offset := TIMERS_RANGE.ContainsAndOffset(absAddr); ok {
+		fmt.Printf("unhandled write to timer register %d <- 0x%x", offset, val)
 		return
 	}
 	if SPU_RANGE.Contains(absAddr) {
-		fmt.Printf("interconnect: ignoring write to SPU register 0x%d\n", addr)
+		fmt.Printf("inter: unhandled write to SPU register at 0x%x\n", addr)
 		return
 	}
-	if TIMERS_RANGE.Contains(absAddr) {
-		fmt.Printf(
-			"interconnect: ignoring write to timer register at offset 0x%x\n",
-			TIMERS_RANGE.Offset(absAddr),
-		)
+	if CACHE_CONTROL.Contains(absAddr) {
+		fmt.Printf("inter: unhandled write to CACHE_CONTROL at 0x%x\n", addr)
 		return
 	}
-	if IRQ_CONTROL.Contains(absAddr) {
-		fmt.Printf("interconnect: IRQ control write 0x%x <- %d\n", IRQ_CONTROL.Offset(absAddr), val)
+	if RAM_SIZE.Contains(absAddr) {
+		// ignore writes to this address
+		return
+	}
+	if ok, offset := EXPANSION_2.ContainsAndOffset(addr); ok {
+		fmt.Printf("inter: unhandled write to EXPANSION 2 register %d\n", offset)
 		return
 	}
 
-	panicFmt("interconnect: unhandled Store16 into address 0x%x <- 0x%x", addr, val)
+	panicFmt("inter: unhandled write into address 0x%x <- 0x%x", addr, accessSizeToU32(size, val))
 }
 
-func (inter *Interconnect) Store8(addr uint32, val uint8) {
-	absAddr := MaskRegion(addr)
+// Shortcut for inter.Load(addr, ACCESS_WORD).(uint32)
+func (inter *Interconnect) Load32(addr uint32) uint32 {
+	return inter.Load(addr, ACCESS_WORD).(uint32)
+}
 
-	if RAM_RANGE.Contains(absAddr) {
-		inter.Ram.Store8(RAM_RANGE.Offset(absAddr), val)
-		return
-	}
-	if EXPANSION_2.Contains(absAddr) {
-		fmt.Printf(
-			"interconnect: ignoring write to expansion 2 register 0x%x\n",
-			EXPANSION_2.Offset(absAddr),
-		)
-		return
-	}
+// Shortcut for inter.Load(addr, ACCESS_HALFWORD).(uint16)
+func (inter *Interconnect) Load16(addr uint32) uint16 {
+	return inter.Load(addr, ACCESS_HALFWORD).(uint16)
+}
 
-	panicFmt("interconnect: unhandled store8 into address 0x%x", addr)
+// Shortcut for inter.Load(addr, ACCESS_BYTE).(byte)
+func (inter *Interconnect) Load8(addr uint32) byte {
+	return inter.Load(addr, ACCESS_BYTE).(byte)
+}
+
+// Shortcut for inter.Store(addr, ACCESS_WORD, val)
+func (inter *Interconnect) Store32(addr, val uint32) {
+	inter.Store(addr, ACCESS_WORD, val)
+}
+
+// Shortcut for inter.Store(addr, ACCESS_HALFWORD, val)
+func (inter *Interconnect) Store16(addr uint32, val uint16) {
+	inter.Store(addr, ACCESS_HALFWORD, val)
+}
+
+// Shortcut for inter.Store(addr, ACCESS_BYTE, val)
+func (inter *Interconnect) Store8(addr uint32, val byte) {
+	inter.Store(addr, ACCESS_BYTE, val)
 }
 
 func MaskRegion(addr uint32) uint32 {

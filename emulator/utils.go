@@ -35,3 +35,35 @@ func sub32Overflow(a, b int32) (int32, error) {
 	}
 	return c, errOverflow
 }
+
+type AccessSize uint32
+
+// Types of accesses supported by the PlayStation archeticture
+
+var (
+	ACCESS_BYTE     AccessSize = 1 // 8 bit
+	ACCESS_HALFWORD AccessSize = 2 // 16 bit
+	ACCESS_WORD     AccessSize = 4 // 32 bit
+)
+
+func accessSizeU32(size AccessSize, val uint32) interface{} {
+	switch size {
+	case ACCESS_BYTE:
+		return byte(val)
+	case ACCESS_HALFWORD:
+		return uint16(val)
+	default: // handles ACCESS_WORD and invalid cases
+		return val
+	}
+}
+
+func accessSizeToU32(size AccessSize, val interface{}) uint32 {
+	switch size {
+	case ACCESS_BYTE:
+		return uint32(val.(byte))
+	case ACCESS_HALFWORD:
+		return uint32(val.(uint16))
+	default: // handles ACCESS_WORD and invalid cases
+		return val.(uint32)
+	}
+}

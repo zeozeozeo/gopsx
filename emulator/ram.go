@@ -16,6 +16,27 @@ func NewRAM() *RAM {
 	}
 }
 
+// Loads a value at `offset`
+func (ram *RAM) Load(offset uint32, size AccessSize) interface{} {
+	var v uint32 = 0
+	sizeI := uint32(size)
+
+	for i := uint32(0); i < sizeI; i++ {
+		v |= uint32(ram.Data[offset+i]) << (i * 8)
+	}
+	return accessSizeU32(size, v)
+}
+
+// Stores `val` into `offset`
+func (ram *RAM) Store(offset uint32, size AccessSize, val interface{}) {
+	valU32 := accessSizeToU32(size, val)
+	sizeI := uint32(size)
+
+	for i := uint32(0); i < sizeI; i++ {
+		ram.Data[offset+i] = byte(valU32 >> (i * 8))
+	}
+}
+
 // Load a 32 bit little endian word at `offset`
 func (ram *RAM) Load32(offset uint32) uint32 {
 	b0 := uint32(ram.Data[offset+0])

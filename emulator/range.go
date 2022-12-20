@@ -47,3 +47,11 @@ func (r *Range) Contains(addr uint32) bool {
 func (r *Range) Offset(addr uint32) uint32 {
 	return addr - r.Start
 }
+
+func (r *Range) ContainsAndOffset(addr uint32) (bool, uint32) {
+	ok := addr >= r.Start && addr < r.Start+r.Length
+	if ok {
+		return true, addr - r.Start
+	}
+	return false, 0
+}
