@@ -87,14 +87,15 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}) 
 		inter.Ram.Store(offset, size, val)
 		return
 	}
-	if MEM_CONTROL.Contains(absAddr) {
-		switch MEM_CONTROL.Offset(absAddr) {
+	if ok, offset := MEM_CONTROL.ContainsAndOffset(absAddr); ok {
+		valU32 := accessSizeToU32(size, val)
+		switch offset {
 		case 0: // expansion 1 base address
-			if val != 0x1f000000 {
+			if valU32 != 0x1f000000 {
 				panicFmt("inter: bad expansion 1 base address 0x%x", addr)
 			}
 		case 4: // expansion 2 base address
-			if val != 0x1f802000 {
+			if valU32 != 0x1f802000 {
 				panicFmt("inter: bad expansion 2 base address 0x%x", addr)
 			}
 		default:

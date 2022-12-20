@@ -139,6 +139,7 @@ func (cpu *CPU) Store8(addr uint32, val uint8) {
 // Decodes and executes an instruction. Panics if the instruction is unhandled
 func (cpu *CPU) DecodeAndExecute(instruction Instruction) {
 	// http://problemkaputt.de/psx-spx.htm#cpuopcodeencoding
+	// fmt.Println(instruction)
 	switch instruction.Function() {
 	case 0b001111: // Load Upper Immediate
 		cpu.OpLUI(instruction)
