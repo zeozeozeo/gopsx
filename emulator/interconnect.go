@@ -69,8 +69,9 @@ func (inter *Interconnect) Load(addr uint32, size AccessSize) interface{} {
 			)
 		}
 	}
-	if ok, offset := TIMERS_RANGE.ContainsAndOffset(absAddr); ok {
-		fmt.Printf("inter: unhandled read from timers register %d\n", offset)
+	if ok, _ := TIMERS_RANGE.ContainsAndOffset(absAddr); ok {
+		// fmt.Printf("inter: unhandled read from timers register %d\n", offset)
+		// TODO
 		return accessSizeU32(size, 0)
 	}
 	if SPU_RANGE.Contains(absAddr) {

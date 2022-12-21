@@ -1,6 +1,9 @@
 package emulator
 
-import "fmt"
+import (
+	"fmt"
+	"image/color"
+)
 
 // Represents the depth of the pixel values in a texture page
 type TextureDepth uint8
@@ -79,8 +82,11 @@ const (
 )
 
 type GPU struct {
-	PageBaseX uint8 // Texture page base X coordinate (4 bits, 64 byte increment)
-	PageBaseY uint8 // Texture page base Y coordinate (1 bit, 256 line increment)
+	DrawData *DrawData // Stores the vertex buffers, etc.
+	// FIXME: remove FrameEnd
+	FrameEnd  func() // If not nil, this function is called after rendering the frame
+	PageBaseX uint8  // Texture page base X coordinate (4 bits, 64 byte increment)
+	PageBaseY uint8  // Texture page base Y coordinate (1 bit, 256 line increment)
 	// Semi-transparency. Not entirely how to handle that value yet, it seems to
 	// describe how to blend the source and the destination colors
 	SemiTransparency uint8
@@ -132,6 +138,7 @@ type GPU struct {
 func NewGPU() *GPU {
 	// not sure what the reset values are, the BIOS should set them anyway
 	gpu := &GPU{
+		DrawData:        NewDrawData(),
 		TextureDepth:    TEXTURE_DEPTH_4BIT,
 		Field:           FIELD_TOP,
 		HRes:            HResFromFields(0, 0),
@@ -249,26 +256,44 @@ func (gpu *GPU) GP0ImageStore() {
 
 // GP0(0x28): Monochrome Opaque Quadliteral
 func (gpu *GPU) GP0QuadMonoOpaque() {
-	// TODO: implement this
-	fmt.Println("gpu: draw quad")
+	clr := ColorFromGP0(gpu.GP0Command.Get(0))
+	gpu.DrawData.PushQuad(
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(1)), clr),
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(2)), clr),
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(3)), clr),
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(4)), clr),
+	)
 }
 
 // GP0(0x38): Shaded Opaque Quadliteral
 func (gpu *GPU) GP0QuadShadedOpaque() {
-	// TODO: implement this
-	fmt.Println("gpu: draw quad shaded")
+	gpu.DrawData.PushQuad(
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(1)), ColorFromGP0(gpu.GP0Command.Get(0))),
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(3)), ColorFromGP0(gpu.GP0Command.Get(2))),
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(5)), ColorFromGP0(gpu.GP0Command.Get(4))),
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(7)), ColorFromGP0(gpu.GP0Command.Get(6))),
+	)
 }
 
 // GP0(0x30): Shaded Opaque Triangle
 func (gpu *GPU) GP0TriangleShadedOpaque() {
-	// TODO: implement this
-	fmt.Println("gpu: draw triangle shaded")
+	gpu.DrawData.PushVertices(
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(1)), ColorFromGP0(gpu.GP0Command.Get(0))),
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(3)), ColorFromGP0(gpu.GP0Command.Get(2))),
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(5)), ColorFromGP0(gpu.GP0Command.Get(4))),
+	)
 }
 
 // GP0(0x2C): Textured Opaque Quadliteral
 func (gpu *GPU) GP0QuadTextureBlendOpaque() {
-	// TODO: implement this
-	fmt.Println("gpu: draw quad texture blending")
+	// FIXME: we don't support textures at this point, so the color is just red
+	clr := color.RGBA{255, 0, 0, 255}
+	gpu.DrawData.PushQuad(
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(1)), clr),
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(3)), clr),
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(5)), clr),
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(7)), clr),
+	)
 }
 
 // GP0(0xE1) command
@@ -327,10 +352,16 @@ func (gpu *GPU) GP0DrawingOffset() {
 	x := uint16(val & 0x7ff)
 	y := uint16((val >> 11) & 0x7ff)
 
+	// call FrameEnd if it's not nil (before updating the offset)
+	if gpu.FrameEnd != nil {
+		gpu.FrameEnd()
+	}
+
 	// values are 11 bit *signed* two's complement values, we need to
 	// shift the value to 16 bits to force sign extension
 	gpu.DrawingXOffset = (int16(x << 5)) >> 5
 	gpu.DrawingYOffset = (int16(y << 5)) >> 5
+
 }
 
 // GP0(0xE2): Set Texture Window
@@ -565,4 +596,9 @@ func (gpu *GPU) Status() uint32 {
 func (gpu *GPU) Read() uint32 {
 	// FIXME: not implemented for now
 	return 0
+}
+
+// Sets the function that will be called when the frame is rendered
+func (gpu *GPU) SetFrameEnd(end func()) {
+	gpu.FrameEnd = end
 }
