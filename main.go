@@ -17,7 +17,8 @@ func main() {
 	// start emulator
 	bios := loadBios(*biosPath)
 	ram := emulator.NewRAM()
-	inter := emulator.NewInterconnect(bios, ram)
+	gpu := emulator.NewGPU()
+	inter := emulator.NewInterconnect(bios, ram, gpu)
 	cpu := emulator.NewCPU(inter)
 
 	for {

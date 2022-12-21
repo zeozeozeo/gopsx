@@ -1256,6 +1256,6 @@ func (cpu *CPU) OpSWC3() {
 }
 
 func (cpu *CPU) OpIllegal(instruction Instruction) {
-	fmt.Printf("cpu: illegal instruction %d\n", instruction)
+	fmt.Printf("cpu: illegal instruction 0x%x\n", instruction)
 	cpu.Exception(EXCEPTION_ILLEGAL_INSTRUCTION)
 }

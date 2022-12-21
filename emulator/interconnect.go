@@ -9,6 +9,7 @@ type Interconnect struct {
 	Bios *BIOS // Basic input/output memory
 	Ram  *RAM  // RAM
 	Dma  *DMA  // Direct Memory Access
+	Gpu  *GPU
 }
 
 // Mask array used to strip the region bits of a CPU address. The mask
@@ -27,11 +28,12 @@ var REGION_MASK = [8]uint32{
 }
 
 // Creates a new interconnect instance
-func NewInterconnect(bios *BIOS, ram *RAM) *Interconnect {
+func NewInterconnect(bios *BIOS, ram *RAM, gpu *GPU) *Interconnect {
 	inter := &Interconnect{
 		Bios: bios,
 		Ram:  ram,
 		Dma:  NewDMA(),
+		Gpu:  gpu,
 	}
 	return inter
 }
@@ -56,14 +58,15 @@ func (inter *Interconnect) Load(addr uint32, size AccessSize) interface{} {
 	if ok, offset := GPU_RANGE.ContainsAndOffset(absAddr); ok {
 		// fmt.Printf("inter: GPU read offset 0x%x\n", offset)
 		switch offset {
-		// GPUSTAT: set bit 26, 27, 28 to signal that the GPU
-		// is ready for DMA and CPU access. This way the BIOS
-		// wont deadlock waiting for an event that will never
-		// come
+		case 0:
+			return inter.Gpu.Read()
 		case 4:
-			return accessSizeU32(size, 0x1c000000)
+			return inter.Gpu.Status()
 		default:
-			return accessSizeU32(size, 0)
+			panicFmt(
+				"inter: unhandled GPU read (offset %d, addr 0x%x, abs 0x%x)",
+				offset, addr, absAddr,
+			)
 		}
 	}
 	if ok, offset := TIMERS_RANGE.ContainsAndOffset(absAddr); ok {
@@ -116,7 +119,16 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}) 
 		return
 	}
 	if ok, offset := GPU_RANGE.ContainsAndOffset(absAddr); ok {
-		fmt.Printf("inter: GPU write 0x%x <- 0x%x\n", offset, val)
+		// fmt.Printf("inter: GPU write 0x%x <- 0x%x\n", offset, val)
+		valU32 := accessSizeToU32(size, val)
+		switch offset {
+		case 0:
+			inter.Gpu.GP0(valU32)
+		case 4:
+			inter.Gpu.GP1(valU32)
+		default:
+			panicFmt("inter: unhandled GPU write 0x%x <- 0x%x\n", offset, val)
+		}
 		return
 	}
 	if ok, offset := TIMERS_RANGE.ContainsAndOffset(absAddr); ok {
@@ -375,7 +387,10 @@ func (inter *Interconnect) DoDmaLinkedList(port Port) {
 		for remsz > 0 {
 			addr = (addr + 4) & 0x1ffffc
 			command := inter.Ram.Load32(addr)
-			fmt.Printf("inter: GPU command 0x%x\n", command)
+
+			// send command to the GPU
+			inter.Gpu.GP0(command)
+
 			remsz--
 		}
 
