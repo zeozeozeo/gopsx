@@ -316,7 +316,7 @@ func (inter *Interconnect) DoDmaBlock(port Port) {
 			srcWord := inter.Ram.Load32(curAddr)
 			switch port {
 			case PORT_GPU:
-				fmt.Printf("inter: GPU data 0x%x", srcWord)
+				fmt.Printf("inter: GPU data 0x%x\n", srcWord)
 			default:
 				panicFmt("inter: unhandled DMA destination port %d", port)
 			}
