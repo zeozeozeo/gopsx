@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"os"
 	"time"
@@ -9,7 +10,12 @@ import (
 )
 
 func main() {
-	bios := loadBios()
+	// parse arguments
+	biosPath := flag.String("bios", "SCPH1001.BIN", "path to the BIOS file")
+	flag.Parse()
+
+	// start emulator
+	bios := loadBios(*biosPath)
 	ram := emulator.NewRAM()
 	inter := emulator.NewInterconnect(bios, ram)
 	cpu := emulator.NewCPU(inter)
@@ -19,12 +25,12 @@ func main() {
 	}
 }
 
-func loadBios() *emulator.BIOS {
-	log.Println("loading bios")
+func loadBios(path string) *emulator.BIOS {
+	log.Printf("loading bios \"%s\"", path)
 	start := time.Now()
 
 	// read bios
-	file, err := os.Open("SCPH1001.BIN")
+	file, err := os.Open(path)
 	if err != nil {
 		panic(err)
 	}
