@@ -9,8 +9,8 @@ var (
 	RAM_SIZE = NewRange(0x1f801060, 4)
 	// Cache control register, full address since it's in KSEG2
 	CACHE_CONTROL = NewRange(0xfffe0130, 4)
-	// RAM
-	RAM_RANGE = NewRange(0x00000000, RAM_ALLOC_SIZE)
+	// Main RAM: 2MB mirrored four times over the first 8MB
+	RAM_RANGE = NewRange(0x00000000, 8*1024*1024)
 	// SPU (Sound Processing Unit)
 	SPU_RANGE = NewRange(0x1f801c00, 640)
 	// Expansion region 1

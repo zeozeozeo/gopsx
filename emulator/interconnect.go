@@ -120,7 +120,7 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}) 
 		return
 	}
 	if ok, offset := TIMERS_RANGE.ContainsAndOffset(absAddr); ok {
-		fmt.Printf("unhandled write to timer register %d <- 0x%x", offset, val)
+		fmt.Printf("unhandled write to timer register %d <- 0x%x\n", offset, val)
 		return
 	}
 	if SPU_RANGE.Contains(absAddr) {
@@ -140,7 +140,10 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}) 
 		return
 	}
 
-	panicFmt("inter: unhandled write into address 0x%x <- 0x%x", addr, accessSizeToU32(size, val))
+	panicFmt(
+		"inter: unhandled write into address 0x%x (abs: 0x%x) <- 0x%x (%d bytes)",
+		addr, absAddr, accessSizeToU32(size, val), size,
+	)
 }
 
 // Shortcut for inter.Load(addr, ACCESS_WORD).(uint32)

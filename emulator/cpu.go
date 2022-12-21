@@ -139,7 +139,6 @@ func (cpu *CPU) Store8(addr uint32, val uint8) {
 // Decodes and executes an instruction. Panics if the instruction is unhandled
 func (cpu *CPU) DecodeAndExecute(instruction Instruction) {
 	// http://problemkaputt.de/psx-spx.htm#cpuopcodeencoding
-	// fmt.Println(instruction)
 	switch instruction.Function() {
 	case 0b001111: // Load Upper Immediate
 		cpu.OpLUI(instruction)
@@ -370,7 +369,8 @@ func (cpu *CPU) OpADDIU(instruction Instruction) {
 	t := instruction.T()
 	s := instruction.S()
 
-	cpu.SetReg(t, cpu.Reg(s)+i)
+	v := cpu.Reg(s) + i
+	cpu.SetReg(t, v)
 }
 
 // Jump
@@ -529,7 +529,7 @@ func (cpu *CPU) OpSH(instruction Instruction) {
 // Jump And Link
 func (cpu *CPU) OpJAL(instruction Instruction) {
 	// store return address in $ra ($31)
-	ra := cpu.PC
+	ra := cpu.NextPC
 	cpu.OpJ(instruction)
 	cpu.SetReg(31, ra)
 	// `cpu.BranchOccured = true` is set by `cpu.OpJ` above
@@ -559,7 +559,6 @@ func (cpu *CPU) OpJR(instruction Instruction) {
 
 // Jump And Link Register
 func (cpu *CPU) OpJALR(instruction Instruction) {
-	// TODO: i don't think this works correctly
 	d := instruction.D()
 	s := instruction.S()
 
@@ -771,9 +770,7 @@ func (cpu *CPU) OpDIV(instruction Instruction) {
 			cpu.Lo = 1
 		}
 	} else if uint32(n) == 0x80000000 && d == -1 {
-		// result is not representable in 32 bits
-
-		// signed integer
+		// result is not representable in a 32 bit signed integer
 		cpu.Hi = 0
 		cpu.Lo = 0x80000000
 	} else {

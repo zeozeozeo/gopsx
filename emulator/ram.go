@@ -1,7 +1,7 @@
 package emulator
 
 const (
-	RAM_ALLOC_SIZE = 2 * 1024 * 1024
+	RAM_ALLOC_SIZE = 2 * 1024 * 1024 // Main PlayStation RAM: 2MB
 )
 
 type RAM struct {

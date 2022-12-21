@@ -57,7 +57,7 @@ func (op Instruction) String() string {
 		return "ORI"
 	case 0b101011: // Store Word
 		return "SW"
-	case 0b000000: // execute subfunction
+	case 0b000000: // parse subfunction
 		switch op.Subfunction() {
 		case 0b000000: // Shift Left Logical
 			return "SLL"
@@ -121,7 +121,16 @@ func (op Instruction) String() string {
 	case 0b000010: // Jump
 		return "J"
 	case 0b010000: // Coprocessor 0 opcode
-		return "COP0"
+		switch op.S() {
+		case 0b00000: // Move From Coprocessor 0
+			return "MFC0"
+		case 0b00100: // Move To Coprocessor 0
+			return "MTC0"
+		case 0b10000: // Return From Expression
+			return "RFE"
+		default:
+			return "COP0"
+		}
 	case 0b000101: // Branch if Not Equal
 		return "BNE"
 	case 0b001000: // Add Immediate Unsigned and check for overflow
