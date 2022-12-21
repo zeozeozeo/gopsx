@@ -355,8 +355,8 @@ func (inter *Interconnect) DoDmaLinkedList(port Port) {
 	channel := inter.Dma.Channels[port]
 	addr := channel.Base & 0x1ffffc
 
-	if channel.Direction != DIRECTION_TO_RAM {
-		panic("inter: invalid DMA direction for linked list mode (expected TO_RAM)")
+	if channel.Direction == DIRECTION_TO_RAM {
+		panic("inter: invalid DMA direction for linked list mode")
 	}
 
 	// i don't know if the DMA even supports linked list mode for anything
