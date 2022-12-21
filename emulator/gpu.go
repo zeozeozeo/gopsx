@@ -1,5 +1,7 @@
 package emulator
 
+import "fmt"
+
 // Represents the depth of the pixel values in a texture page
 type TextureDepth uint8
 
@@ -66,6 +68,16 @@ const (
 	DD_VRAM_TO_CPU DmaDirection = 3
 )
 
+type GP0CommandHandler func()
+
+// Possible states for the GP0 command register
+type GP0Mode uint8
+
+const (
+	GP0_MODE_COMMAND    GP0Mode = iota // Default mode: handling commands
+	GP0_MODE_IMAGE_LOAD GP0Mode = iota // Loading an image into VRAM
+)
+
 type GPU struct {
 	PageBaseX uint8 // Texture page base X coordinate (4 bits, 64 byte increment)
 	PageBaseY uint8 // Texture page base Y coordinate (1 bit, 256 line increment)
@@ -88,31 +100,33 @@ type GPU struct {
 	// Display depth. The GPU itself always draws 15 bit RGB, 24 bit output must
 	// use external assets (pre-rendered textures, MDEC, etc.)
 	DisplayDepth          DisplayDepth
-	Interlaced            bool          // Output interlaced video signal instead of progressive
-	DisplayDisabled       bool          // Disable the display
-	Interrupt             bool          // True when the interrupt is active
-	DmaDirection          DmaDirection  // DMA request direction
-	RectangleTextureXFlip bool          // Mirror textured rectangles along the X axis
-	RectangleTextureYFlip bool          // Mirror textured rectangles along the Y axis
-	TextureWindowXMask    uint8         // Texture window X mask (8 pixel steps)
-	TextureWindowYMask    uint8         // Texture window Y mask (8 pixel steps)
-	TextureWindowXOffset  uint8         // Texture window X offset (8 pixel steps)
-	TextureWindowYOffset  uint8         // Texture window Y offset (8 pixel steps)
-	DrawingAreaLeft       uint16        // Left-most column of the drawing area
-	DrawingAreaTop        uint16        // Top−most line of the drawing area
-	DrawingAreaRight      uint16        // Right−most column of the drawing area
-	DrawingAreaBottom     uint16        // Bottom−most line of the drawing area
-	DrawingXOffset        int16         // Horizontal drawing offset applied to all vertex
-	DrawingYOffset        int16         // Vertical drawing offset applied to all vertex
-	DisplayVRamXStart     uint16        // First column of the display area in VRAM
-	DisplayVRamYStart     uint16        // First line of the display area in VRAM
-	DisplayHorizStart     uint16        // Display output horizontal start relative to HSYNC
-	DisplayHorizEnd       uint16        // Display output horizontal end relative to HSYNC
-	DisplayLineStart      uint16        // Display output first line relative to VSYNC
-	DisplayLineEnd        uint16        // Display output last line relative to VSYNC
-	GP0Command            CommandBuffer // Buffer containing the current GP0 command
-	GP0CommandRemaining   uint32        // Remaining words for the current GP0 command
-	GP0CommandMethod      func()        // Method implementing the current GP0 command
+	Interlaced            bool         // Output interlaced video signal instead of progressive
+	DisplayDisabled       bool         // Disable the display
+	Interrupt             bool         // True when the interrupt is active
+	DmaDirection          DmaDirection // DMA request direction
+	RectangleTextureXFlip bool         // Mirror textured rectangles along the X axis
+	RectangleTextureYFlip bool         // Mirror textured rectangles along the Y axis
+	TextureWindowXMask    uint8        // Texture window X mask (8 pixel steps)
+	TextureWindowYMask    uint8        // Texture window Y mask (8 pixel steps)
+	TextureWindowXOffset  uint8        // Texture window X offset (8 pixel steps)
+	TextureWindowYOffset  uint8        // Texture window Y offset (8 pixel steps)
+	DrawingAreaLeft       uint16       // Left-most column of the drawing area
+	DrawingAreaTop        uint16       // Top−most line of the drawing area
+	DrawingAreaRight      uint16       // Right−most column of the drawing area
+	DrawingAreaBottom     uint16       // Bottom−most line of the drawing area
+	DrawingXOffset        int16        // Horizontal drawing offset applied to all vertex
+	DrawingYOffset        int16        // Vertical drawing offset applied to all vertex
+	DisplayVRamXStart     uint16       // First column of the display area in VRAM
+	DisplayVRamYStart     uint16       // First line of the display area in VRAM
+	DisplayHorizStart     uint16       // Display output horizontal start relative to HSYNC
+	DisplayHorizEnd       uint16       // Display output horizontal end relative to HSYNC
+	DisplayLineStart      uint16       // Display output first line relative to VSYNC
+	DisplayLineEnd        uint16       // Display output last line relative to VSYNC
+
+	GP0Command        CommandBuffer     // Buffer containing the current GP0 command
+	GP0WordsRemaining uint32            // Remaining words for the current GP0 command
+	GP0CommandMethod  GP0CommandHandler // Method implementing the current GP0 command
+	GP0Mode           GP0Mode           // Current mode of the GP0 register
 }
 
 func NewGPU() *GPU {
@@ -126,36 +140,141 @@ func NewGPU() *GPU {
 		DisplayDepth:    DISPLAY_DEPTH_15BITS,
 		DisplayDisabled: true,
 		DmaDirection:    DD_DMA_OFF,
+		GP0Mode:         GP0_MODE_COMMAND,
 	}
 	return gpu
 }
 
 // Handle writes to the GP0 command register
 func (gpu *GPU) GP0(val uint32) {
-	opcode := (val >> 24) & 0xff
+	if gpu.GP0WordsRemaining == 0 {
+		// start a new GP0 command
+		opcode := (val >> 24) & 0xff
 
-	switch opcode {
-	case 0x00:
-		// NOP
-	case 0xe1:
-		gpu.GP0DrawMode(val)
-	case 0xe2:
-		gpu.GP0TextureWindow(val)
-	case 0xe3:
-		gpu.GP0DrawingAreaTopLeft(val)
-	case 0xe4:
-		gpu.GP0DrawingAreaBottomRight(val)
-	case 0xe5:
-		gpu.GP0DrawingOffset(val)
-	case 0xe6:
-		gpu.GP0MaskBitSetting(val)
-	default:
-		panicFmt("gpu: unhandled GP0 command 0x%x", val)
+		var length uint32
+		var method GP0CommandHandler
+
+		switch opcode {
+		case 0x00:
+			length, method = 1, gpu.GP0Nop
+		case 0x01:
+			length, method = 1, gpu.GP0ClearCache
+		case 0x28:
+			length, method = 5, gpu.GP0QuadMonoOpaque
+		case 0x2c:
+			length, method = 9, gpu.GP0QuadTextureBlendOpaque
+		case 0x30:
+			length, method = 6, gpu.GP0TriangleShadedOpaque
+		case 0x38:
+			length, method = 8, gpu.GP0QuadShadedOpaque
+		case 0xa0:
+			length, method = 3, gpu.GP0ImageLoad
+		case 0xc0:
+			length, method = 3, gpu.GP0ImageStore
+		case 0xe1:
+			length, method = 1, gpu.GP0DrawMode
+		case 0xe2:
+			length, method = 1, gpu.GP0TextureWindow
+		case 0xe3:
+			length, method = 1, gpu.GP0DrawingAreaTopLeft
+		case 0xe4:
+			length, method = 1, gpu.GP0DrawingAreaBottomRight
+		case 0xe5:
+			length, method = 1, gpu.GP0DrawingOffset
+		case 0xe6:
+			length, method = 1, gpu.GP0MaskBitSetting
+		default:
+			panicFmt("gpu: unhandled GP0 command 0x%x", val)
+		}
+
+		gpu.GP0WordsRemaining = length
+		gpu.GP0CommandMethod = method
+		gpu.GP0Command.Clear()
+	}
+
+	// continue current command
+	gpu.GP0WordsRemaining--
+
+	switch gpu.GP0Mode {
+	case GP0_MODE_COMMAND:
+		gpu.GP0Command.PushWord(val)
+
+		if gpu.GP0WordsRemaining == 0 {
+			// we have all the parameters, now we can run the method
+			gpu.GP0CommandMethod()
+		}
+	case GP0_MODE_IMAGE_LOAD:
+		// FIXME: this should load pixel data into VRAM
+
+		if gpu.GP0WordsRemaining == 0 {
+			// load done, switch back to command mode
+			gpu.GP0Mode = GP0_MODE_COMMAND
+		}
 	}
 }
 
+// GP0(0xA0): Image Load
+func (gpu *GPU) GP0ImageLoad() {
+	// parameter 2 contains the image resolution
+	res := gpu.GP0Command.Get(2)
+	width := res & 0xffff
+	height := res >> 16
+
+	// size of the image in 16 bit pixels
+	imgSize := width * height
+
+	// if we have an odd number of pixels we must round up since we
+	// transfer 32 bits at a time. there'll be 16 bits of padding in
+	// the last word
+	imgSize = uint32(int64(imgSize+1) & ^1)
+
+	// store number of words expected for this image
+	gpu.GP0WordsRemaining = imgSize / 2
+
+	// put the GP0 state machine in ImageLoad mode
+	gpu.GP0Mode = GP0_MODE_IMAGE_LOAD
+
+	// TODO: implement actual image copy
+}
+
+// GP0(0xC0): Image Store
+func (gpu *GPU) GP0ImageStore() {
+	// parameter 2 contains the image resolution
+	res := gpu.GP0Command.Get(2)
+	width := res & 0xffff
+	height := res >> 16
+
+	fmt.Printf("gpu: unhandled image store: %dx%d\n", width, height)
+}
+
+// GP0(0x28): Monochrome Opaque Quadliteral
+func (gpu *GPU) GP0QuadMonoOpaque() {
+	// TODO: implement this
+	fmt.Println("gpu: draw quad")
+}
+
+// GP0(0x38): Shaded Opaque Quadliteral
+func (gpu *GPU) GP0QuadShadedOpaque() {
+	// TODO: implement this
+	fmt.Println("gpu: draw quad shaded")
+}
+
+// GP0(0x30): Shaded Opaque Triangle
+func (gpu *GPU) GP0TriangleShadedOpaque() {
+	// TODO: implement this
+	fmt.Println("gpu: draw triangle shaded")
+}
+
+// GP0(0x2C): Textured Opaque Quadliteral
+func (gpu *GPU) GP0QuadTextureBlendOpaque() {
+	// TODO: implement this
+	fmt.Println("gpu: draw quad texture blending")
+}
+
 // GP0(0xE1) command
-func (gpu *GPU) GP0DrawMode(val uint32) {
+func (gpu *GPU) GP0DrawMode() {
+	val := gpu.GP0Command.Get(0)
+
 	gpu.PageBaseX = uint8(val & 0xf)
 	gpu.PageBaseY = uint8((val >> 4) & 1)
 	gpu.SemiTransparency = uint8((val >> 5) & 3)
@@ -178,20 +297,33 @@ func (gpu *GPU) GP0DrawMode(val uint32) {
 	gpu.RectangleTextureYFlip = ((val >> 13) & 1) != 0
 }
 
+// GP0(0x00): No Operation
+func (gpu *GPU) GP0Nop() {
+	// NOP
+}
+
+// GP0(0x01): Clear Cache
+func (gpu *GPU) GP0ClearCache() {
+	// not implemented
+}
+
 // GP0(0xE3): Set Drawing Area Top Left
-func (gpu *GPU) GP0DrawingAreaTopLeft(val uint32) {
+func (gpu *GPU) GP0DrawingAreaTopLeft() {
+	val := gpu.GP0Command.Get(0)
 	gpu.DrawingAreaTop = uint16((val >> 10) & 0x3ff)
 	gpu.DrawingAreaLeft = uint16(val & 0x3ff)
 }
 
 // GP0(0xE4): Set Drawing Area BottomRight
-func (gpu *GPU) GP0DrawingAreaBottomRight(val uint32) {
+func (gpu *GPU) GP0DrawingAreaBottomRight() {
+	val := gpu.GP0Command.Get(0)
 	gpu.DrawingAreaBottom = uint16((val >> 10) & 0x3ff)
 	gpu.DrawingAreaRight = uint16(val & 0x3ff)
 }
 
 // GP0(0xE5): Set Drawing Offset
-func (gpu *GPU) GP0DrawingOffset(val uint32) {
+func (gpu *GPU) GP0DrawingOffset() {
+	val := gpu.GP0Command.Get(0)
 	x := uint16(val & 0x7ff)
 	y := uint16((val >> 11) & 0x7ff)
 
@@ -202,7 +334,8 @@ func (gpu *GPU) GP0DrawingOffset(val uint32) {
 }
 
 // GP0(0xE2): Set Texture Window
-func (gpu *GPU) GP0TextureWindow(val uint32) {
+func (gpu *GPU) GP0TextureWindow() {
+	val := gpu.GP0Command.Get(0)
 	gpu.TextureWindowXMask = uint8(val & 0x1f)
 	gpu.TextureWindowYMask = uint8((val >> 5) & 0x1f)
 	gpu.TextureWindowXOffset = uint8((val >> 10) & 0x1f)
@@ -210,7 +343,8 @@ func (gpu *GPU) GP0TextureWindow(val uint32) {
 }
 
 // GP0(0xE6): Set Mask Bit Setting
-func (gpu *GPU) GP0MaskBitSetting(val uint32) {
+func (gpu *GPU) GP0MaskBitSetting() {
+	val := gpu.GP0Command.Get(0)
 	gpu.ForceSetMaskBit = (val & 1) != 0
 	gpu.PreserveMaskedPixels = (val & 2) != 0
 }
@@ -222,6 +356,12 @@ func (gpu *GPU) GP1(val uint32) {
 	switch opcode {
 	case 0x00:
 		gpu.GP1Reset()
+	case 0x01:
+		gpu.GP1ResetCommandBuffer()
+	case 0x02:
+		gpu.GP1AcknowledgeIrq()
+	case 0x03:
+		gpu.GP1DisplayEnable(val)
 	case 0x04:
 		gpu.GP1DmaDirection(val)
 	case 0x05:
@@ -344,6 +484,24 @@ func (gpu *GPU) GP1DisplayVerticalRange(val uint32) {
 	gpu.DisplayLineEnd = uint16((val >> 10) & 0x3ff)
 }
 
+// GP1(0x03): Display Enable
+func (gpu *GPU) GP1DisplayEnable(val uint32) {
+	gpu.DisplayDisabled = val&1 != 0
+}
+
+// GP1(0x02): Acknowledge Interrupt
+func (gpu *GPU) GP1AcknowledgeIrq() {
+	gpu.Interrupt = false
+}
+
+// GP1(0x01): Reset Command Buffer
+func (gpu *GPU) GP1ResetCommandBuffer() {
+	gpu.GP0Command.Clear()
+	gpu.GP0WordsRemaining = 0
+	gpu.GP0Mode = GP0_MODE_COMMAND
+	// FIXME: this should also clear the command FIFO, when we implement it
+}
+
 // Return value of the status register
 func (gpu *GPU) Status() uint32 {
 	var r uint32
@@ -361,7 +519,9 @@ func (gpu *GPU) Status() uint32 {
 	// the display in a weird way)
 	r |= oneIfTrue(gpu.TextureDisable) << 15
 	r |= gpu.HRes.IntoStatus()
-	r |= uint32(gpu.VRes) << 19
+	// FIXME: temporary hack: if we don't emulate bit 31 correctly, setting `VRes`
+	//        to 1 locks the BIOS:
+	// r |= uint32(gpu.VRes) << 19
 	r |= uint32(gpu.VMode) << 20
 	r |= uint32(gpu.DisplayDepth) << 21
 	r |= oneIfTrue(gpu.Interlaced) << 22

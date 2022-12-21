@@ -14,9 +14,9 @@
 
 # Status
 
-The CPU, RAM and the DMA are mostly implented (except for interrupts)
+The CPU, RAM and the DMA are mostly implented (except for interrupts). The GPU is partially implemented, it successfully displays the boot logo (no actual renderer yet, but the commands are (almost) implemented)
 
-![GPU commands](https://cdn.discordapp.com/attachments/783966433641365504/1055000975934496829/image.png)
+![GPU commands](https://cdn.discordapp.com/attachments/783966433641365504/1055074229315436725/image.png)
 
 # Thanks
 

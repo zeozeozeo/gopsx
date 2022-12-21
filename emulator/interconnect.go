@@ -74,7 +74,8 @@ func (inter *Interconnect) Load(addr uint32, size AccessSize) interface{} {
 		return accessSizeU32(size, 0)
 	}
 	if SPU_RANGE.Contains(absAddr) {
-		fmt.Printf("inter: unhandled read from SPU register 0x%x\n", absAddr)
+		// ignore this for now (TODO)
+		// fmt.Printf("inter: unhandled read from SPU register 0x%x\n", absAddr)
 		return accessSizeU32(size, 0)
 	}
 	if EXPANSION_1.Contains(absAddr) {
@@ -136,7 +137,8 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}) 
 		return
 	}
 	if SPU_RANGE.Contains(absAddr) {
-		fmt.Printf("inter: unhandled write to SPU register at 0x%x\n", addr)
+		// ignore this for now (TODO)
+		// fmt.Printf("inter: unhandled write to SPU register at 0x%x\n", addr)
 		return
 	}
 	if CACHE_CONTROL.Contains(absAddr) {
@@ -328,7 +330,7 @@ func (inter *Interconnect) DoDmaBlock(port Port) {
 			srcWord := inter.Ram.Load32(curAddr)
 			switch port {
 			case PORT_GPU:
-				fmt.Printf("inter: GPU data 0x%x\n", srcWord)
+				inter.Gpu.GP0(srcWord)
 			default:
 				panicFmt("inter: unhandled DMA destination port %d", port)
 			}
