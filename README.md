@@ -12,6 +12,12 @@
 
 2. To boot the BIOS, run `<command> -bios "BIOS_PATH_HERE"`. The default BIOS path is `SCPH1001.BIN`, but i'll probably remove that sometime.
 
+# Status
+
+The CPU, RAM and the DMA are mostly implented (except for interrupts)
+
+![GPU commands](https://cdn.discordapp.com/attachments/783966433641365504/1055000975934496829/image.png)
+
 # Thanks
 
 Special thanks to [simias](https://github.com/simias) for writing [this amazing guide](https://github.com/simias/psx-guide) to writing a PlayStation emulator, and to the [Nocash PSX spec](https://problemkaputt.de/psx.htm).
