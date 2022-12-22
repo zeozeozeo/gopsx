@@ -40,7 +40,7 @@ func NewInterconnect(bios *BIOS, ram *RAM, gpu *GPU) *Interconnect {
 }
 
 // Load value at `addr`
-func (inter *Interconnect) Load(addr uint32, size AccessSize) interface{} {
+func (inter *Interconnect) Load(addr uint32, size AccessSize, th *TimeHandler) interface{} {
 	absAddr := MaskRegion(addr)
 
 	if ok, offset := RAM_RANGE.ContainsAndOffset(absAddr); ok {
@@ -57,18 +57,7 @@ func (inter *Interconnect) Load(addr uint32, size AccessSize) interface{} {
 		return accessSizeU32(size, inter.DmaReg(offset))
 	}
 	if ok, offset := GPU_RANGE.ContainsAndOffset(absAddr); ok {
-		// fmt.Printf("inter: GPU read offset 0x%x\n", offset)
-		switch offset {
-		case 0:
-			return inter.Gpu.Read()
-		case 4:
-			return inter.Gpu.Status()
-		default:
-			panicFmt(
-				"inter: unhandled GPU read (offset %d, addr 0x%x, abs 0x%x)",
-				offset, addr, absAddr,
-			)
-		}
+		return inter.Gpu.Load(offset, th)
 	}
 	if ok, _ := TIMERS_RANGE.ContainsAndOffset(absAddr); ok {
 		// fmt.Printf("inter: unhandled read from timers register %d\n", offset)
@@ -90,7 +79,7 @@ func (inter *Interconnect) Load(addr uint32, size AccessSize) interface{} {
 }
 
 // Write value into `addr`
-func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}) {
+func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}, th *TimeHandler) {
 	absAddr := MaskRegion(addr)
 
 	if ok, offset := RAM_RANGE.ContainsAndOffset(absAddr); ok {
@@ -124,14 +113,7 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}) 
 	if ok, offset := GPU_RANGE.ContainsAndOffset(absAddr); ok {
 		// fmt.Printf("inter: GPU write 0x%x <- 0x%x\n", offset, val)
 		valU32 := accessSizeToU32(size, val)
-		switch offset {
-		case 0:
-			inter.Gpu.GP0(valU32)
-		case 4:
-			inter.Gpu.GP1(valU32)
-		default:
-			panicFmt("inter: unhandled GPU write 0x%x <- 0x%x\n", offset, val)
-		}
+		inter.Gpu.Store(offset, valU32, th)
 		return
 	}
 	if ok, offset := TIMERS_RANGE.ContainsAndOffset(absAddr); ok {
@@ -164,33 +146,33 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}) 
 }
 
 // Shortcut for inter.Load(addr, ACCESS_WORD).(uint32)
-func (inter *Interconnect) Load32(addr uint32) uint32 {
-	return inter.Load(addr, ACCESS_WORD).(uint32)
+func (inter *Interconnect) Load32(addr uint32, th *TimeHandler) uint32 {
+	return inter.Load(addr, ACCESS_WORD, th).(uint32)
 }
 
 // Shortcut for inter.Load(addr, ACCESS_HALFWORD).(uint16)
-func (inter *Interconnect) Load16(addr uint32) uint16 {
-	return inter.Load(addr, ACCESS_HALFWORD).(uint16)
+func (inter *Interconnect) Load16(addr uint32, th *TimeHandler) uint16 {
+	return inter.Load(addr, ACCESS_HALFWORD, th).(uint16)
 }
 
 // Shortcut for inter.Load(addr, ACCESS_BYTE).(byte)
-func (inter *Interconnect) Load8(addr uint32) byte {
-	return inter.Load(addr, ACCESS_BYTE).(byte)
+func (inter *Interconnect) Load8(addr uint32, th *TimeHandler) byte {
+	return inter.Load(addr, ACCESS_BYTE, th).(byte)
 }
 
 // Shortcut for inter.Store(addr, ACCESS_WORD, val)
-func (inter *Interconnect) Store32(addr, val uint32) {
-	inter.Store(addr, ACCESS_WORD, val)
+func (inter *Interconnect) Store32(addr, val uint32, th *TimeHandler) {
+	inter.Store(addr, ACCESS_WORD, val, th)
 }
 
 // Shortcut for inter.Store(addr, ACCESS_HALFWORD, val)
-func (inter *Interconnect) Store16(addr uint32, val uint16) {
-	inter.Store(addr, ACCESS_HALFWORD, val)
+func (inter *Interconnect) Store16(addr uint32, val uint16, th *TimeHandler) {
+	inter.Store(addr, ACCESS_HALFWORD, val, th)
 }
 
 // Shortcut for inter.Store(addr, ACCESS_BYTE, val)
-func (inter *Interconnect) Store8(addr uint32, val byte) {
-	inter.Store(addr, ACCESS_BYTE, val)
+func (inter *Interconnect) Store8(addr uint32, val byte, th *TimeHandler) {
+	inter.Store(addr, ACCESS_BYTE, val, th)
 }
 
 func MaskRegion(addr uint32) uint32 {
@@ -411,4 +393,28 @@ func (inter *Interconnect) DoDmaLinkedList(port Port) {
 	}
 
 	channel.Done()
+}
+
+// Synchronizes all peripherals
+func (inter *Interconnect) Sync(th *TimeHandler) {
+	if th.NeedsSync(PERIPHERAL_GPU) {
+		inter.Gpu.Sync(th)
+	}
+}
+
+// Load instruction at `pc`
+func (inter *Interconnect) LoadInstruction(pc uint32) uint32 {
+	absAddr := MaskRegion(pc)
+
+	// TODO: currently only loads instructions from RAM and the BIOS
+
+	if ok, offset := RAM_RANGE.ContainsAndOffset(absAddr); ok {
+		return inter.Ram.Load32(offset)
+	}
+	if ok, offset := BIOS_RANGE.ContainsAndOffset(absAddr); ok {
+		return inter.Bios.Load32(offset)
+	}
+
+	panicFmt("inter: unhandled instruction load at address 0x%x", pc)
+	return 0
 }

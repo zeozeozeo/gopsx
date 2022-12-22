@@ -62,6 +62,7 @@ func (g *ebitenGame) drawFrame() {
 	}
 
 	// clear previous frame and draw the new one
+	// FIXME: for some reason, the image is flickering after the GPU timings were implemented
 	currentFrame.Clear()
 	g.renderer.Draw(currentFrame)
 	if *showFps {
@@ -97,7 +98,7 @@ func startEmulator(g *ebitenGame, biosPath string) {
 	// start emulator
 	bios := loadBios(biosPath)
 	ram := emulator.NewRAM()
-	gpu = emulator.NewGPU()
+	gpu = emulator.NewGPU(emulator.HARDWARE_NTSC)
 	gpu.SetFrameEnd(g.drawFrame)
 	inter := emulator.NewInterconnect(bios, ram, gpu)
 	cpu := emulator.NewCPU(inter)

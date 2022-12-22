@@ -29,6 +29,9 @@ const (
 	FIELD_BOTTOM Field = 0 // Bottom field (even lines)
 )
 
+// Use 16 bits for the fractional part of the clock ratio to get good precision
+const CLOCK_RATIO_FRAC = 0x10000
+
 // Video output horizontal resolution
 type HorizontalRes uint8
 
@@ -58,6 +61,13 @@ type VMode uint8
 const (
 	VMODE_NTSC VMode = 0 // NTSC: 480i60Hz
 	VMODE_PAL  VMode = 1 // PAL: 576i50Hz
+)
+
+type HardwareType uint8
+
+const (
+	HARDWARE_NTSC HardwareType = 0 // NTSC: 480i60Hz
+	HARDWARE_PAL  HardwareType = 1 // PAL: 576i50Hz
 )
 
 // Display area color depth
@@ -90,11 +100,10 @@ const (
 
 // Graphics Processing Unit state
 type GPU struct {
-	DrawData *DrawData // Stores the vertex buffers, etc.
-	// FIXME: remove FrameEnd
-	FrameEnd  func() // If not nil, this function is called after rendering the frame
-	PageBaseX uint8  // Texture page base X coordinate (4 bits, 64 byte increment)
-	PageBaseY uint8  // Texture page base Y coordinate (1 bit, 256 line increment)
+	DrawData  *DrawData // Stores the vertex buffers, etc.
+	FrameEnd  func()    // If not nil, this function is called after rendering the frame
+	PageBaseX uint8     // Texture page base X coordinate (4 bits, 64 byte increment)
+	PageBaseY uint8     // Texture page base Y coordinate (1 bit, 256 line increment)
 	// Semi-transparency. Not entirely how to handle that value yet, it seems to
 	// describe how to blend the source and the destination colors
 	SemiTransparency uint8
@@ -114,50 +123,59 @@ type GPU struct {
 	// Display depth. The GPU itself always draws 15 bit RGB, 24 bit output must
 	// use external assets (pre-rendered textures, MDEC, etc.)
 	DisplayDepth          DisplayDepth
-	Interlaced            bool         // Output interlaced video signal instead of progressive
-	DisplayDisabled       bool         // Disable the display
-	Interrupt             bool         // True when the interrupt is active
-	DmaDirection          DmaDirection // DMA request direction
-	RectangleTextureXFlip bool         // Mirror textured rectangles along the X axis
-	RectangleTextureYFlip bool         // Mirror textured rectangles along the Y axis
-	TextureWindowXMask    uint8        // Texture window X mask (8 pixel steps)
-	TextureWindowYMask    uint8        // Texture window Y mask (8 pixel steps)
-	TextureWindowXOffset  uint8        // Texture window X offset (8 pixel steps)
-	TextureWindowYOffset  uint8        // Texture window Y offset (8 pixel steps)
-	DrawingAreaLeft       uint16       // Left-most column of the drawing area
-	DrawingAreaTop        uint16       // Top−most line of the drawing area
-	DrawingAreaRight      uint16       // Right−most column of the drawing area
-	DrawingAreaBottom     uint16       // Bottom−most line of the drawing area
-	DrawingXOffset        int16        // Horizontal drawing offset applied to all vertex
-	DrawingYOffset        int16        // Vertical drawing offset applied to all vertex
-	DisplayVRamXStart     uint16       // First column of the display area in VRAM
-	DisplayVRamYStart     uint16       // First line of the display area in VRAM
-	DisplayHorizStart     uint16       // Display output horizontal start relative to HSYNC
-	DisplayHorizEnd       uint16       // Display output horizontal end relative to HSYNC
-	DisplayLineStart      uint16       // Display output first line relative to VSYNC
-	DisplayLineEnd        uint16       // Display output last line relative to VSYNC
-
-	GP0Command        CommandBuffer     // Buffer containing the current GP0 command
-	GP0WordsRemaining uint32            // Remaining words for the current GP0 command
-	GP0Handler        GP0CommandHandler // Method implementing the current GP0 command
-	GP0Mode           GP0Mode           // Current mode of the GP0 register
-	LoadBuffer        *ImageBuffer      // GP0 ImageLoad buffer
+	Interlaced            bool              // Output interlaced video signal instead of progressive
+	DisplayDisabled       bool              // Disable the display
+	GP0Interrupt          bool              // True when the  GP0interrupt is active
+	DmaDirection          DmaDirection      // DMA request direction
+	RectangleTextureXFlip bool              // Mirror textured rectangles along the X axis
+	RectangleTextureYFlip bool              // Mirror textured rectangles along the Y axis
+	TextureWindowXMask    uint8             // Texture window X mask (8 pixel steps)
+	TextureWindowYMask    uint8             // Texture window Y mask (8 pixel steps)
+	TextureWindowXOffset  uint8             // Texture window X offset (8 pixel steps)
+	TextureWindowYOffset  uint8             // Texture window Y offset (8 pixel steps)
+	DrawingAreaLeft       uint16            // Left-most column of the drawing area
+	DrawingAreaTop        uint16            // Top−most line of the drawing area
+	DrawingAreaRight      uint16            // Right−most column of the drawing area
+	DrawingAreaBottom     uint16            // Bottom−most line of the drawing area
+	DrawingXOffset        int16             // Horizontal drawing offset applied to all vertex
+	DrawingYOffset        int16             // Vertical drawing offset applied to all vertex
+	DisplayVRamXStart     uint16            // First column of the display area in VRAM
+	DisplayVRamYStart     uint16            // First line of the display area in VRAM
+	DisplayHorizStart     uint16            // Display output horizontal start relative to HSYNC
+	DisplayHorizEnd       uint16            // Display output horizontal end relative to HSYNC
+	DisplayLineStart      uint16            // Display output first line relative to VSYNC
+	DisplayLineEnd        uint16            // Display output last line relative to VSYNC
+	GP0Command            CommandBuffer     // Buffer containing the current GP0 command
+	GP0WordsRemaining     uint32            // Remaining words for the current GP0 command
+	GP0Handler            GP0CommandHandler // Method implementing the current GP0 command
+	GP0Mode               GP0Mode           // Current mode of the GP0 register
+	LoadBuffer            *ImageBuffer      // GP0 ImageLoad buffer
+	ClockFrac             uint16            // Fractional GPU cycle remainder from CPU clock
+	DisplayLine           uint16            // Currently displayed video output line
+	DisplayLineTick       uint16            // Current GPU clock tick for the current line
+	VBlankInterrupt       bool              // True if the VBLANK interrupt is high
+	Hardware              HardwareType
 }
 
-func NewGPU() *GPU {
+func NewGPU(hardware HardwareType) *GPU {
 	// not sure what the reset values are, the BIOS should set them anyway
 	gpu := &GPU{
-		DrawData:        NewDrawData(),
-		TextureDepth:    TEXTURE_DEPTH_4BIT,
-		Field:           FIELD_TOP,
-		HRes:            HResFromFields(0, 0),
-		VRes:            VRES_240_LINES,
-		VMode:           VMODE_NTSC,
-		DisplayDepth:    DISPLAY_DEPTH_15BITS,
-		DisplayDisabled: true,
-		DmaDirection:    DD_DMA_OFF,
-		GP0Mode:         GP0_MODE_COMMAND,
-		LoadBuffer:      NewImageBuffer(),
+		DrawData:          NewDrawData(),
+		TextureDepth:      TEXTURE_DEPTH_4BIT,
+		Field:             FIELD_TOP,
+		HRes:              HResFromFields(0, 0),
+		VRes:              VRES_240_LINES,
+		VMode:             VMODE_NTSC,
+		DisplayDepth:      DISPLAY_DEPTH_15BITS,
+		DisplayDisabled:   true,
+		DmaDirection:      DD_DMA_OFF,
+		GP0Mode:           GP0_MODE_COMMAND,
+		LoadBuffer:        NewImageBuffer(),
+		DisplayHorizStart: 0x200,
+		DisplayHorizEnd:   0xc00,
+		DisplayLineStart:  0x10,
+		DisplayLineEnd:    0x100,
+		Hardware:          hardware,
 	}
 	return gpu
 }
@@ -379,11 +397,6 @@ func (gpu *GPU) GP0DrawingOffset() {
 	x := uint16(val & 0x7ff)
 	y := uint16((val >> 11) & 0x7ff)
 
-	// call FrameEnd if it's not nil (before updating the offset)
-	if gpu.FrameEnd != nil {
-		gpu.FrameEnd()
-	}
-
 	// values are 11 bit *signed* two's complement values, we need to
 	// shift the value to 16 bits to force sign extension
 	gpu.DrawingXOffset = (int16(x << 5)) >> 5
@@ -408,12 +421,12 @@ func (gpu *GPU) GP0MaskBitSetting() {
 }
 
 // Handle writes to the GP1 command register
-func (gpu *GPU) GP1(val uint32) {
+func (gpu *GPU) GP1(val uint32, th *TimeHandler) {
 	opcode := (val >> 24) & 0xff
 
 	switch opcode {
 	case 0x00:
-		gpu.GP1Reset()
+		gpu.GP1Reset(th)
 	case 0x01:
 		gpu.GP1ResetCommandBuffer()
 	case 0x02:
@@ -427,17 +440,16 @@ func (gpu *GPU) GP1(val uint32) {
 	case 0x06:
 		gpu.GP1DisplayHorizontalRange(val)
 	case 0x07:
-		gpu.GP1DisplayVerticalRange(val)
+		gpu.GP1DisplayVerticalRange(val, th)
 	case 0x08:
-		gpu.GP1DisplayMode(val)
+		gpu.GP1DisplayMode(val, th)
 	default:
 		panicFmt("gpu: unhandled GP1 command 0x%x", val)
 	}
 }
 
 // GP1(0x00): soft reset
-func (gpu *GPU) GP1Reset() {
-	gpu.Interrupt = false
+func (gpu *GPU) GP1Reset(th *TimeHandler) {
 	gpu.PageBaseX = 0
 	gpu.PageBaseY = 0
 	gpu.SemiTransparency = 0
@@ -472,12 +484,20 @@ func (gpu *GPU) GP1Reset() {
 	gpu.DisplayLineStart = 0x10
 	gpu.DisplayLineEnd = 0x100
 	gpu.DisplayDepth = DISPLAY_DEPTH_15BITS
+	gpu.Field = FIELD_TOP
+	gpu.DisplayLine = 0
+	gpu.DisplayLineTick = 0
+	gpu.DrawingXOffset = 0
+	gpu.DrawingYOffset = 0
+	gpu.GP1ResetCommandBuffer()
+	gpu.GP1AcknowledgeIrq()
+	gpu.Sync(th)
 	// FIXME: should also clear the FIFO when it's implemented
 	// FIXME: should also invalidate GPU cache when it's implemented
 }
 
 // GP1(0x80): display mode
-func (gpu *GPU) GP1DisplayMode(val uint32) {
+func (gpu *GPU) GP1DisplayMode(val uint32, th *TimeHandler) {
 	hr1 := uint8(val & 3)
 	hr2 := uint8((val >> 6) & 1)
 
@@ -503,9 +523,14 @@ func (gpu *GPU) GP1DisplayMode(val uint32) {
 
 	gpu.Interlaced = val&0x20 != 0
 
+	// TODO: should we reset the field here?
+	gpu.Field = FIELD_TOP
+
 	if val&0x80 != 0 {
 		panicFmt("gpu: unsupported display mode 0x%x", val)
 	}
+
+	gpu.Sync(th)
 }
 
 // GP1(0x04): DMA direction
@@ -537,9 +562,10 @@ func (gpu *GPU) GP1DisplayHorizontalRange(val uint32) {
 }
 
 // GP1(0x07): Display Vertical Range
-func (gpu *GPU) GP1DisplayVerticalRange(val uint32) {
+func (gpu *GPU) GP1DisplayVerticalRange(val uint32, th *TimeHandler) {
 	gpu.DisplayLineStart = uint16(val & 0x3ff)
 	gpu.DisplayLineEnd = uint16((val >> 10) & 0x3ff)
+	gpu.Sync(th)
 }
 
 // GP1(0x03): Display Enable
@@ -549,7 +575,7 @@ func (gpu *GPU) GP1DisplayEnable(val uint32) {
 
 // GP1(0x02): Acknowledge Interrupt
 func (gpu *GPU) GP1AcknowledgeIrq() {
-	gpu.Interrupt = false
+	gpu.GP0Interrupt = false
 }
 
 // GP1(0x01): Reset Command Buffer
@@ -577,14 +603,12 @@ func (gpu *GPU) Status() uint32 {
 	// the display in a weird way)
 	r |= oneIfTrue(gpu.TextureDisable) << 15
 	r |= gpu.HRes.IntoStatus()
-	// FIXME: temporary hack: if we don't emulate bit 31 correctly, setting `VRes`
-	//        to 1 locks the BIOS:
-	// r |= uint32(gpu.VRes) << 19
+	r |= uint32(gpu.VRes) << 19
 	r |= uint32(gpu.VMode) << 20
 	r |= uint32(gpu.DisplayDepth) << 21
 	r |= oneIfTrue(gpu.Interlaced) << 22
 	r |= oneIfTrue(gpu.DisplayDisabled) << 23
-	r |= oneIfTrue(gpu.Interrupt) << 24
+	r |= oneIfTrue(gpu.GP0Interrupt) << 24
 
 	// for now, we pretend that the GPU is always ready:
 	// ready to recieve command
@@ -596,9 +620,11 @@ func (gpu *GPU) Status() uint32 {
 
 	r |= uint32(gpu.DmaDirection) << 29
 
-	// bit 31 should change depending on the currently drawn line (whether it's even,
-	// odd or in the vblank apparently). we won't bother with it for now
-	r |= 0 << 31
+	// bit 31 is 1 if the currently displayed VRAM line is odd, 0 if it's even or if
+	// we're in vertical blanking
+	if !gpu.InVBlank() {
+		r |= uint32(gpu.DisplayedVRamLine()&1) << 31
+	}
 
 	// not sure about that, i'm guessing that it's the signal checked by the DMA
 	// when sending data in Request synchronization mode, for now blindly follow
@@ -628,4 +654,175 @@ func (gpu *GPU) Read() uint32 {
 // Sets the function that will be called when the frame is rendered
 func (gpu *GPU) SetFrameEnd(end func()) {
 	gpu.FrameEnd = end
+}
+
+// Convert GPU clock ratio to CPU clock ratio
+func (gpu *GPU) GPUToCPUClockRatio() uint64 {
+	// convert delta into GPU clock periods
+	var cpuClock float32 = 33.8685
+	var gpuClock float32
+	switch gpu.Hardware {
+	case HARDWARE_NTSC:
+		gpuClock = 53.69
+	case HARDWARE_PAL:
+		gpuClock = 53.20
+	}
+
+	return uint64((gpuClock / cpuClock) * float32(CLOCK_RATIO_FRAC))
+}
+
+// Returns the number of GPU clock cycles per line, and the number of lines
+// in a frame, depending of `VMode`
+func (gpu *GPU) GetVModeTimings() (uint16, uint16) {
+	switch gpu.VMode {
+	case VMODE_NTSC:
+		return 3412, 263
+	case VMODE_PAL:
+		return 3404, 314
+	}
+	return 0, 0
+}
+
+// Returns the number of GPU clock cycles per line, and the number of lines
+// in a frame, depending of `VMode` in a 64 bit unsigned integer
+func (gpu *GPU) GetVModeTimingsU64() (uint64, uint64) {
+	ticksPerLine, linesPerFrame := gpu.GetVModeTimings()
+	return uint64(ticksPerLine), uint64(linesPerFrame)
+}
+
+// Returns true if the GPU is in the blanking period
+func (gpu *GPU) InVBlank() bool {
+	return gpu.DisplayLine < gpu.DisplayLineStart || gpu.DisplayLine >= gpu.DisplayLineEnd
+}
+
+// Synchronizes the GPU state
+func (gpu *GPU) Sync(th *TimeHandler) {
+	delta := th.Sync(PERIPHERAL_GPU)
+	delta = uint64(gpu.ClockFrac) + delta*gpu.GPUToCPUClockRatio()
+
+	// the low 16 bits are the new fractional part
+	gpu.ClockFrac = uint16(delta)
+	delta >>= 16 // make delta an integer again
+
+	ticksPerLine, linesPerFrame := gpu.GetVModeTimingsU64()
+
+	lineTick := uint64(gpu.DisplayLineTick) + delta
+	line := uint64(gpu.DisplayLine) + lineTick/ticksPerLine
+
+	gpu.DisplayLineTick = uint16(lineTick % ticksPerLine)
+
+	if line > linesPerFrame {
+		// new frame
+		if gpu.Interlaced {
+			// update field
+			nframes := line / linesPerFrame
+			if (nframes+uint64(gpu.Field))&1 != 0 {
+				gpu.Field = FIELD_TOP
+			} else {
+				gpu.Field = FIELD_BOTTOM
+			}
+		}
+
+		gpu.DisplayLine = uint16(line % linesPerFrame)
+	} else {
+		gpu.DisplayLine = uint16(line)
+	}
+
+	vblankInterrupt := gpu.InVBlank()
+
+	/* FIXME
+	if !gpu.VBlankInterrupt && vblankInterrupt {
+		// should trigger an interrupt in the controller
+		fmt.Println("gpu: interrupt")
+	}
+	*/
+
+	if gpu.VBlankInterrupt && !vblankInterrupt {
+		// end of vertical blanking, do the FrameEnd callback
+		if gpu.FrameEnd != nil {
+			gpu.FrameEnd()
+		}
+	}
+
+	gpu.VBlankInterrupt = vblankInterrupt
+	gpu.PredictNextSync(th)
+}
+
+func (gpu *GPU) PredictNextSync(th *TimeHandler) {
+	ticksPerLine, linesPerFrame := gpu.GetVModeTimingsU64()
+	var delta uint64 = 0
+	currLine := uint64(gpu.DisplayLine)
+	displayLineStart := uint64(gpu.DisplayLineStart)
+	displayLineEnd := uint64(gpu.DisplayLineEnd)
+
+	// number of ticks to get to the start of the next line
+	delta += ticksPerLine - uint64(gpu.DisplayLineTick)
+
+	if currLine >= displayLineEnd {
+		// in vertical blanking at the end of the frame, synchronize
+		// at the end of the blanking at the beginning of the next frame
+
+		// number of ticks to get to the next frame
+		delta += (linesPerFrame - currLine) * ticksPerLine
+		// number of ticks to get to the end of the vblank in the next frame
+		delta += (displayLineStart - 1) * ticksPerLine
+	} else if currLine < displayLineStart {
+		// in vertical blanking in the beginning of the frame, synchronize
+		// at the end of the blanking in the current frame
+		delta += (displayLineStart - 1 - currLine) * ticksPerLine
+	} else {
+		// not in blanking; synchronize at the beginning of the vertical blanking period
+		delta += (displayLineEnd - 1 - currLine) * ticksPerLine
+	}
+
+	// convert delta to CPU clock periods
+	delta *= CLOCK_RATIO_FRAC
+	// remove the current fractional cycle
+	delta -= uint64(gpu.ClockFrac)
+
+	// make sure we're never triggered too early
+	ratio := gpu.GPUToCPUClockRatio()
+	delta = (delta + ratio - 1) / ratio
+
+	th.SetNextSyncDelta(PERIPHERAL_GPU, delta)
+}
+
+// Returns the index of the currently displayed VRAM line
+func (gpu *GPU) DisplayedVRamLine() uint16 {
+	var offset uint16
+	if gpu.Interlaced {
+		offset = gpu.DisplayLine*2 + uint16(gpu.Field)
+	} else {
+		offset = gpu.DisplayLine
+	}
+
+	// the VRAM wraps around, so incase of overflow truncate it to 9 bits
+	return (gpu.DisplayVRamYStart + offset) & 0x1ff
+}
+
+func (gpu *GPU) Load(offset uint32, th *TimeHandler) uint32 {
+	gpu.Sync(th)
+
+	switch offset {
+	case 0:
+		return gpu.Read()
+	case 4:
+		return gpu.Status()
+	default:
+		panicFmt("gpu: unhandled GPU read (offset %d)", offset)
+	}
+	return 0
+}
+
+func (gpu *GPU) Store(offset uint32, val uint32, th *TimeHandler) {
+	gpu.Sync(th)
+
+	switch offset {
+	case 0:
+		gpu.GP0(val)
+	case 4:
+		gpu.GP1(val, th)
+	default:
+		panicFmt("gpu: unhandled GPU write 0x%x <- 0x%x\n", offset, val)
+	}
 }

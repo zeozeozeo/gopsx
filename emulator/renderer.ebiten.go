@@ -44,21 +44,12 @@ func (renderer *EbitenRenderer) Draw(screen *ebiten.Image) {
 		vertices[idx].DstX = x
 		vertices[idx].DstY = y
 
-		/*
-			ebitenutil.DebugPrintAt(
-				screen,
-				fmt.Sprintf("* x: %d, y: %d", int(x), int(y)),
-				int(x), int(y),
-			)
-		*/
-
 		// FIXME
 		vertices[idx].SrcX = 0
 		vertices[idx].SrcY = 0
 
 		indices[idx] = uint16(idx)
 	}
-	// fmt.Print("\n")
 
 	op := &ebiten.DrawTrianglesOptions{}
 	screen.DrawTriangles(

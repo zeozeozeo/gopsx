@@ -40,6 +40,7 @@ type CPU struct {
 	Debugger *Debugger
 	// Instruction Cache (256 cache lines)
 	ICache [0x100]*ICacheLine
+	Th     *TimeHandler // Keeps track of the emulation time
 }
 
 // Creates a new CPU state
@@ -53,6 +54,7 @@ func NewCPU(inter *Interconnect) *CPU {
 		Hi:       0xdeadbeef, // junk
 		Lo:       0xdeadbeef, // junk
 		Debugger: NewDebugger(),
+		Th:       NewTimeHandler(),
 	}
 
 	// initialize registers to 0..32 (the values are not initialized on reset,
@@ -72,6 +74,9 @@ func NewCPU(inter *Interconnect) *CPU {
 
 // Runs the instruction at the program counter and increments it
 func (cpu *CPU) RunNextInstruction() {
+	// synchronize peripherals
+	cpu.Inter.Sync(cpu.Th)
+
 	// save the address of the current instruction to save in EPC in case of an exception
 	pc := cpu.PC
 	cpu.CurrentPC = pc
@@ -134,9 +139,13 @@ func (cpu *CPU) FetchInstruction() Instruction {
 		if line.Tag() != tag || line.ValidIndex() > index {
 			// cache miss, get the cacheline at the current index
 			cpc := pc
-			// TODO: make sure this works
+
+			// fetching takes 3 cycles + 1 instruction on average
+			cpu.Th.Tick(3)
+
 			for i := index; i < 4; i++ {
-				instruction := Instruction(cpu.Inter.Load32(cpc))
+				cpu.Th.Tick(1)
+				instruction := Instruction(cpu.Inter.LoadInstruction(cpc))
 				line.Set(i, instruction)
 				cpc += 4
 			}
@@ -148,25 +157,27 @@ func (cpu *CPU) FetchInstruction() Instruction {
 	}
 
 	// cache is disabled, get instruction from memory
-	return Instruction(cpu.Inter.Load32(pc))
+	// this takes 4 cycles on average
+	cpu.Th.Tick(4)
+	return Instruction(cpu.Inter.LoadInstruction(pc))
 }
 
 // Returns a 32bit little endian value at `addr`
 func (cpu *CPU) Load32(addr uint32) uint32 {
 	cpu.Debugger.memoryRead(addr)
-	return cpu.Inter.Load32(addr)
+	return cpu.Inter.Load32(addr, cpu.Th)
 }
 
 // Returns a 16bit little endian value at `addr`
 func (cpu *CPU) Load16(addr uint32) uint16 {
 	cpu.Debugger.memoryRead(addr)
-	return cpu.Inter.Load16(addr)
+	return cpu.Inter.Load16(addr, cpu.Th)
 }
 
 // Returns the byte at `addr`
 func (cpu *CPU) Load8(addr uint32) byte {
 	cpu.Debugger.memoryRead(addr)
-	return cpu.Inter.Load8(addr)
+	return cpu.Inter.Load8(addr, cpu.Th)
 }
 
 func (cpu *CPU) Store(addr uint32, size AccessSize, val interface{}) {
@@ -174,7 +185,7 @@ func (cpu *CPU) Store(addr uint32, size AccessSize, val interface{}) {
 		cpu.CacheMaintenance(addr, size, val)
 	} else {
 		cpu.Debugger.memoryWrite(addr)
-		cpu.Inter.Store(addr, size, val)
+		cpu.Inter.Store(addr, size, val, cpu.Th)
 	}
 }
 
@@ -225,6 +236,10 @@ func (cpu *CPU) Store8(addr uint32, val uint8) {
 // Decodes and executes an instruction. Panics if the instruction is unhandled
 func (cpu *CPU) DecodeAndExecute(instruction Instruction) {
 	// http://problemkaputt.de/psx-spx.htm#cpuopcodeencoding
+
+	// simulate instruction execution time
+	cpu.Th.Tick(1)
+
 	switch instruction.Function() {
 	case 0b001111: // Load Upper Immediate
 		cpu.OpLUI(instruction)
