@@ -27,6 +27,18 @@ func LoadBIOS(r io.Reader) (*BIOS, error) {
 	return &BIOS{Data: data}, nil
 }
 
+// Loads a BIOS from bytes
+func LoadBIOSFromData(data []byte) (*BIOS, error) {
+	if len(data) != int(BIOS_SIZE) {
+		return nil, fmt.Errorf(
+			"invalid BIOS size (expected %d, got %d (bytes))",
+			BIOS_SIZE, len(data),
+		)
+	}
+	// success
+	return &BIOS{Data: data}, nil
+}
+
 // Returns a 32 bit little endian value at `offset`. Note that `offset` is
 // not the absolute address used by the CPU, instead it is an offset in the
 // BIOS memory range
