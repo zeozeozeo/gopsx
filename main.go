@@ -4,6 +4,7 @@ import (
 	"flag"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -14,6 +15,7 @@ var (
 	width, height = 1024, 512
 	gpu           *emulator.GPU
 	currentFrame  = ebiten.NewImage(width, height)
+	wg            sync.WaitGroup
 )
 
 type ebitenGame struct {
@@ -34,6 +36,7 @@ func (g *ebitenGame) Draw(screen *ebiten.Image) {
 	scaleY := float64(height) / float64(fy)
 	op.GeoM.Scale(scaleX, scaleY)
 
+	wg.Wait()
 	screen.DrawImage(currentFrame, op)
 }
 
@@ -42,6 +45,8 @@ func (g *ebitenGame) Layout(insideWidth, insideHeight int) (int, int) {
 }
 
 func (g *ebitenGame) drawFrame() {
+	wg.Add(1)
+	defer wg.Done()
 	// create renderer if it's nil
 	if g.renderer == nil {
 		g.renderer = gpu.NewEbitenRenderer()

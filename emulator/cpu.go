@@ -36,7 +36,8 @@ type CPU struct {
 	// Cop0 register 13: Cause Register
 	Cause uint32
 	// Cop0 register 14: EPC
-	Epc uint32
+	Epc      uint32
+	Debugger *Debugger
 }
 
 // Creates a new CPU state
@@ -46,9 +47,10 @@ func NewCPU(inter *Interconnect) *CPU {
 		PC:     pc,
 		NextPC: pc + 4,
 		// NextInstruction: Instruction(0x0), // NOP
-		Inter: inter,
-		Hi:    0xdeadbeef, // junk
-		Lo:    0xdeadbeef, // junk
+		Inter:    inter,
+		Hi:       0xdeadbeef, // junk
+		Lo:       0xdeadbeef, // junk
+		Debugger: NewDebugger(),
 	}
 
 	// initialize registers to 0..32 (the values are not initialized on reset,
@@ -67,6 +69,9 @@ func (cpu *CPU) RunNextInstruction() {
 	pc := cpu.PC
 	cpu.CurrentPC = pc
 
+	// debugger entrypoint
+	cpu.Debugger.changedPc(pc)
+
 	// FIXME: there's no need to check if PC is incorectly aligned for each instruction,
 	//        instead we could make jump and branch instructions not capable of setting
 	//        unaligned PC addresses
@@ -78,7 +83,7 @@ func (cpu *CPU) RunNextInstruction() {
 	}
 
 	// fetch instruction at PC
-	instruction := Instruction(cpu.Load32(pc))
+	instruction := Instruction(cpu.Inter.Load32(pc))
 
 	// increment PC to point to the next instruction (all instructions are 32 bit long)
 	cpu.PC = cpu.NextPC
@@ -108,31 +113,37 @@ func (cpu *CPU) RunNextInstruction() {
 
 // Returns a 32bit little endian value at `addr`
 func (cpu *CPU) Load32(addr uint32) uint32 {
+	cpu.Debugger.memoryRead(addr)
 	return cpu.Inter.Load32(addr)
 }
 
 // Returns a 16bit little endian value at `addr`
 func (cpu *CPU) Load16(addr uint32) uint16 {
+	cpu.Debugger.memoryRead(addr)
 	return cpu.Inter.Load16(addr)
 }
 
 // Returns the byte at `addr`
 func (cpu *CPU) Load8(addr uint32) byte {
+	cpu.Debugger.memoryRead(addr)
 	return cpu.Inter.Load8(addr)
 }
 
 // Store 32 bit value into memory
 func (cpu *CPU) Store32(addr, val uint32) {
+	cpu.Debugger.memoryWrite(addr)
 	cpu.Inter.Store32(addr, val)
 }
 
 // Store 16 bit value into memory
 func (cpu *CPU) Store16(addr uint32, val uint16) {
+	cpu.Debugger.memoryWrite(addr)
 	cpu.Inter.Store16(addr, val)
 }
 
-// Store 32 bit value into memory
+// Store 8 bit value into memory
 func (cpu *CPU) Store8(addr uint32, val uint8) {
+	cpu.Debugger.memoryWrite(addr)
 	cpu.Inter.Store8(addr, val)
 }
 

@@ -39,8 +39,18 @@ func (renderer *EbitenRenderer) Draw(screen *ebiten.Image) {
 		vertices[idx].ColorG = float32(vtx.Color.G) / 255
 		vertices[idx].ColorB = float32(vtx.Color.B) / 255
 		vertices[idx].ColorA = 1 // should always be 1
-		vertices[idx].DstX = float32(vtx.Position.X + renderer.Gpu.DrawingXOffset)
-		vertices[idx].DstY = float32(vtx.Position.Y + renderer.Gpu.DrawingYOffset)
+		x := float32(vtx.Position.X + renderer.Gpu.DrawingXOffset)
+		y := float32(vtx.Position.Y + renderer.Gpu.DrawingYOffset)
+		vertices[idx].DstX = x
+		vertices[idx].DstY = y
+
+		/*
+			ebitenutil.DebugPrintAt(
+				screen,
+				fmt.Sprintf("* x: %d, y: %d", int(x), int(y)),
+				int(x), int(y),
+			)
+		*/
 
 		// FIXME
 		vertices[idx].SrcX = 0
@@ -48,6 +58,7 @@ func (renderer *EbitenRenderer) Draw(screen *ebiten.Image) {
 
 		indices[idx] = uint16(idx)
 	}
+	// fmt.Print("\n")
 
 	op := &ebiten.DrawTrianglesOptions{}
 	screen.DrawTriangles(

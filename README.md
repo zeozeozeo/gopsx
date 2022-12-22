@@ -14,7 +14,7 @@
 
 # Status
 
-The CPU, RAM and the DMA are mostly implented (except for interrupts). The boot logo is being rendered correctly, but it's all flickery. not sure what causes that
+The CPU, RAM and the DMA are mostly implented (except for interrupts). The boot logo is being rendered correctly, but textures are not supported yet
 
 ![Boot animation](https://cdn.discordapp.com/attachments/783966433641365504/1055192963334021170/image.png)
 
