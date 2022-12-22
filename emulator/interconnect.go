@@ -6,10 +6,11 @@ import (
 
 // Global interconnect. It stores all of the peripherals
 type Interconnect struct {
-	Bios *BIOS // Basic input/output memory
-	Ram  *RAM  // RAM
-	Dma  *DMA  // Direct Memory Access
-	Gpu  *GPU
+	Bios      *BIOS        // Basic input/output memory
+	Ram       *RAM         // RAM
+	Dma       *DMA         // Direct Memory Access
+	Gpu       *GPU         // Graphics Processing Unit
+	CacheCtrl CacheControl // Cache Control register
 }
 
 // Mask array used to strip the region bits of a CPU address. The mask
@@ -143,7 +144,8 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}) 
 		return
 	}
 	if CACHE_CONTROL.Contains(absAddr) {
-		fmt.Printf("inter: unhandled write to CACHE_CONTROL at 0x%x\n", addr)
+		valU32 := accessSizeToU32(size, val)
+		inter.CacheCtrl = CacheControl(valU32)
 		return
 	}
 	if RAM_SIZE.Contains(absAddr) {

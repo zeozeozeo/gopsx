@@ -2,12 +2,14 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/zeozeozeo/gopsx/emulator"
 )
 
@@ -16,6 +18,9 @@ var (
 	gpu           *emulator.GPU
 	currentFrame  = ebiten.NewImage(width, height)
 	wg            sync.WaitGroup
+	prevFrameTime = time.Now()
+	deltaTime     float64
+	showFps       *bool
 )
 
 type ebitenGame struct {
@@ -47,6 +52,10 @@ func (g *ebitenGame) Layout(insideWidth, insideHeight int) (int, int) {
 func (g *ebitenGame) drawFrame() {
 	wg.Add(1)
 	defer wg.Done()
+
+	// calculate delta time
+	deltaTime = time.Since(prevFrameTime).Seconds()
+
 	// create renderer if it's nil
 	if g.renderer == nil {
 		g.renderer = gpu.NewEbitenRenderer()
@@ -55,6 +64,11 @@ func (g *ebitenGame) drawFrame() {
 	// clear previous frame and draw the new one
 	currentFrame.Clear()
 	g.renderer.Draw(currentFrame)
+	if *showFps {
+		ebitenutil.DebugPrintAt(currentFrame, fmt.Sprintf("%f fps", 1/deltaTime), 8, 8)
+	}
+
+	prevFrameTime = time.Now()
 }
 
 func startEbitenWindow(g *ebitenGame) {
@@ -67,18 +81,21 @@ func startEbitenWindow(g *ebitenGame) {
 }
 
 func main() {
+	// parse arguments
+	biosPath := flag.String("bios", "SCPH1001.BIN", "path to the BIOS file")
+	showFps = flag.Bool("fps", true, "show FPS value")
+	flag.Parse()
+
+	fmt.Println(*showFps)
+
 	g := &ebitenGame{}
-	go startEmulator(g)
+	go startEmulator(g, *biosPath)
 	startEbitenWindow(g)
 }
 
-func startEmulator(g *ebitenGame) {
-	// parse arguments
-	biosPath := flag.String("bios", "SCPH1001.BIN", "path to the BIOS file")
-	flag.Parse()
-
+func startEmulator(g *ebitenGame, biosPath string) {
 	// start emulator
-	bios := loadBios(*biosPath)
+	bios := loadBios(biosPath)
 	ram := emulator.NewRAM()
 	gpu = emulator.NewGPU()
 	gpu.SetFrameEnd(g.drawFrame)

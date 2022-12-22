@@ -2,9 +2,14 @@ package emulator
 
 import "image/color"
 
-// A 2 dimensional vector
+// A 2 dimensional vector (int16)
 type Vec2 struct {
 	X, Y int16
+}
+
+// A 2 dimensional vector (uint16)
+type Vec2U struct {
+	X, Y uint16
 }
 
 // A single vertex with a position and color

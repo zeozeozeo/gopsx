@@ -14,6 +14,13 @@ const (
 	TEXTURE_DEPTH_15BIT TextureDepth = 2 // 15 bits per pixel
 )
 
+// VRAM dimensions
+const (
+	VRAM_WIDTH_PIXELS  = 1024
+	VRAM_HEIGHT_PIXELS = 512
+	VRAM_SIZE_PIXELS   = VRAM_WIDTH_PIXELS * VRAM_HEIGHT_PIXELS
+)
+
 // Interlaced output splits each frame in two fields
 type Field uint8
 
@@ -81,6 +88,7 @@ const (
 	GP0_MODE_IMAGE_LOAD GP0Mode = iota // Loading an image into VRAM
 )
 
+// Graphics Processing Unit state
 type GPU struct {
 	DrawData *DrawData // Stores the vertex buffers, etc.
 	// FIXME: remove FrameEnd
@@ -131,8 +139,9 @@ type GPU struct {
 
 	GP0Command        CommandBuffer     // Buffer containing the current GP0 command
 	GP0WordsRemaining uint32            // Remaining words for the current GP0 command
-	GP0CommandMethod  GP0CommandHandler // Method implementing the current GP0 command
+	GP0Handler        GP0CommandHandler // Method implementing the current GP0 command
 	GP0Mode           GP0Mode           // Current mode of the GP0 register
+	LoadBuffer        *ImageBuffer      // GP0 ImageLoad buffer
 }
 
 func NewGPU() *GPU {
@@ -148,6 +157,7 @@ func NewGPU() *GPU {
 		DisplayDisabled: true,
 		DmaDirection:    DD_DMA_OFF,
 		GP0Mode:         GP0_MODE_COMMAND,
+		LoadBuffer:      NewImageBuffer(),
 	}
 	return gpu
 }
@@ -159,43 +169,43 @@ func (gpu *GPU) GP0(val uint32) {
 		opcode := (val >> 24) & 0xff
 
 		var length uint32
-		var method GP0CommandHandler
+		var handler GP0CommandHandler
 
 		switch opcode {
 		case 0x00:
-			length, method = 1, gpu.GP0Nop
+			length, handler = 1, gpu.GP0Nop
 		case 0x01:
-			length, method = 1, gpu.GP0ClearCache
+			length, handler = 1, gpu.GP0ClearCache
 		case 0x28:
-			length, method = 5, gpu.GP0QuadMonoOpaque
+			length, handler = 5, gpu.GP0QuadMonoOpaque
 		case 0x2c:
-			length, method = 9, gpu.GP0QuadTextureBlendOpaque
+			length, handler = 9, gpu.GP0QuadTextureBlendOpaque
 		case 0x30:
-			length, method = 6, gpu.GP0TriangleShadedOpaque
+			length, handler = 6, gpu.GP0TriangleShadedOpaque
 		case 0x38:
-			length, method = 8, gpu.GP0QuadShadedOpaque
+			length, handler = 8, gpu.GP0QuadShadedOpaque
 		case 0xa0:
-			length, method = 3, gpu.GP0ImageLoad
+			length, handler = 3, gpu.GP0ImageLoad
 		case 0xc0:
-			length, method = 3, gpu.GP0ImageStore
+			length, handler = 3, gpu.GP0ImageStore
 		case 0xe1:
-			length, method = 1, gpu.GP0DrawMode
+			length, handler = 1, gpu.GP0DrawMode
 		case 0xe2:
-			length, method = 1, gpu.GP0TextureWindow
+			length, handler = 1, gpu.GP0TextureWindow
 		case 0xe3:
-			length, method = 1, gpu.GP0DrawingAreaTopLeft
+			length, handler = 1, gpu.GP0DrawingAreaTopLeft
 		case 0xe4:
-			length, method = 1, gpu.GP0DrawingAreaBottomRight
+			length, handler = 1, gpu.GP0DrawingAreaBottomRight
 		case 0xe5:
-			length, method = 1, gpu.GP0DrawingOffset
+			length, handler = 1, gpu.GP0DrawingOffset
 		case 0xe6:
-			length, method = 1, gpu.GP0MaskBitSetting
+			length, handler = 1, gpu.GP0MaskBitSetting
 		default:
 			panicFmt("gpu: unhandled GP0 command 0x%x", val)
 		}
 
 		gpu.GP0WordsRemaining = length
-		gpu.GP0CommandMethod = method
+		gpu.GP0Handler = handler
 		gpu.GP0Command.Clear()
 	}
 
@@ -208,24 +218,27 @@ func (gpu *GPU) GP0(val uint32) {
 
 		if gpu.GP0WordsRemaining == 0 {
 			// we have all the parameters, now we can run the method
-			gpu.GP0CommandMethod()
+			gpu.GP0Handler()
 		}
 	case GP0_MODE_IMAGE_LOAD:
-		// FIXME: this should load pixel data into VRAM
-
-		if gpu.GP0WordsRemaining == 0 {
-			// load done, switch back to command mode
-			gpu.GP0Mode = GP0_MODE_COMMAND
-		}
+		gpu.GP0HandleImageLoad(val)
 	}
 }
 
 // GP0(0xA0): Image Load
 func (gpu *GPU) GP0ImageLoad() {
+	// the top-left corner location in VRAM
+	pos := gpu.GP0Command.Get(1)
+
+	gpu.LoadBuffer.Position.X = uint16(pos)
+	gpu.LoadBuffer.Position.Y = uint16(pos >> 16)
+
 	// parameter 2 contains the image resolution
 	res := gpu.GP0Command.Get(2)
 	width := res & 0xffff
 	height := res >> 16
+	gpu.LoadBuffer.Resolution.X = uint16(width)
+	gpu.LoadBuffer.Resolution.Y = uint16(height)
 
 	// size of the image in 16 bit pixels
 	imgSize := width * height
@@ -238,10 +251,24 @@ func (gpu *GPU) GP0ImageLoad() {
 	// store number of words expected for this image
 	gpu.GP0WordsRemaining = imgSize / 2
 
+	if gpu.GP0WordsRemaining == 0 {
+		panic("gpu: 0 size image load")
+	}
+
 	// put the GP0 state machine in ImageLoad mode
 	gpu.GP0Mode = GP0_MODE_IMAGE_LOAD
+}
 
-	// TODO: implement actual image copy
+func (gpu *GPU) GP0HandleImageLoad(word uint32) {
+	gpu.LoadBuffer.PushWord(word)
+
+	if gpu.GP0WordsRemaining == 0 {
+		// load done, switch back to command mode
+		gpu.GP0Mode = GP0_MODE_COMMAND
+		// TODO: load image here
+		fmt.Println("gpu: unhandled image load")
+		gpu.LoadBuffer.Clear()
+	}
 }
 
 // GP0(0xC0): Image Store

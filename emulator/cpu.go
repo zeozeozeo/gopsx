@@ -28,7 +28,7 @@ type CPU struct {
 	DelaySlot bool
 
 	// COP0 register 12: Status Register
-	SR uint32
+	SR StatusRegister
 	// HI register for division remainder and multiplication high result
 	Hi uint32
 	// LO register for division quotient and multiplication low result
@@ -38,6 +38,8 @@ type CPU struct {
 	// Cop0 register 14: EPC
 	Epc      uint32
 	Debugger *Debugger
+	// Instruction Cache (256 cache lines)
+	ICache [0x100]*ICacheLine
 }
 
 // Creates a new CPU state
@@ -58,6 +60,11 @@ func NewCPU(inter *Interconnect) *CPU {
 	// always be zero)
 	for i := 0; i < len(cpu.Regs); i++ {
 		cpu.Regs[i] = uint32(i)
+	}
+
+	// initialize cache lines
+	for i := 0; i < len(cpu.ICache); i++ {
+		cpu.ICache[i] = NewCacheLine()
 	}
 
 	return cpu
@@ -83,7 +90,7 @@ func (cpu *CPU) RunNextInstruction() {
 	}
 
 	// fetch instruction at PC
-	instruction := Instruction(cpu.Inter.Load32(pc))
+	instruction := cpu.FetchInstruction()
 
 	// increment PC to point to the next instruction (all instructions are 32 bit long)
 	cpu.PC = cpu.NextPC
@@ -111,6 +118,39 @@ func (cpu *CPU) RunNextInstruction() {
 	cpu.Regs = cpu.OutRegs
 }
 
+func (cpu *CPU) FetchInstruction() Instruction {
+	pc := cpu.CurrentPC
+	cc := cpu.Inter.CacheCtrl
+
+	// KSEG1 is never cached
+	kseg1 := (pc & 0xe0000000) == 0xa0000000
+
+	if !kseg1 && cc.ICacheEnabled() {
+		tag := pc & 0xfffff000           // cache tag: bits [31:12]
+		line := cpu.ICache[(pc>>4)&0xff] // cache line: bits [11:4]
+		index := (pc >> 2) & 3           // cache line index: bits [3:2]
+
+		// check line tag and validity
+		if line.Tag() != tag || line.ValidIndex() > index {
+			// cache miss, get the cacheline at the current index
+			cpc := pc
+			// TODO: make sure this works
+			for i := index; i < 4; i++ {
+				instruction := Instruction(cpu.Inter.Load32(cpc))
+				line.Set(i, instruction)
+				cpc += 4
+			}
+
+			line.SetTagValid(pc) // set tag and valid bits
+		}
+
+		return line.Get(index)
+	}
+
+	// cache is disabled, get instruction from memory
+	return Instruction(cpu.Inter.Load32(pc))
+}
+
 // Returns a 32bit little endian value at `addr`
 func (cpu *CPU) Load32(addr uint32) uint32 {
 	cpu.Debugger.memoryRead(addr)
@@ -129,22 +169,57 @@ func (cpu *CPU) Load8(addr uint32) byte {
 	return cpu.Inter.Load8(addr)
 }
 
+func (cpu *CPU) Store(addr uint32, size AccessSize, val interface{}) {
+	if cpu.SR.CacheIsolated() {
+		cpu.CacheMaintenance(addr, size, val)
+	} else {
+		cpu.Debugger.memoryWrite(addr)
+		cpu.Inter.Store(addr, size, val)
+	}
+}
+
+// Handles writes when the cache is isolated
+func (cpu *CPU) CacheMaintenance(addr uint32, size AccessSize, val interface{}) {
+	// FIXME: this is not the full cache implementation, just cache invalidation
+	//        for now
+	cc := cpu.Inter.CacheCtrl
+	valU32 := accessSizeToU32(size, val)
+
+	if !cc.ICacheEnabled() {
+		panicFmt("cpu: cache maintenance while instruction cache is disabled 0x%x", valU32)
+	}
+	if size != ACCESS_WORD || valU32 != 0 {
+		panicFmt("cpu: unsupported write while cache is isolated 0x%x", valU32)
+	}
+
+	// get the cache line for this address
+	line := cpu.ICache[(addr>>4)&0xff]
+
+	if cc.TagTestMode() {
+		// in tag test mode, the write will invalidate the entire targeted
+		// cache line
+		line.Invalidate()
+	} else {
+		// the write ends up directly in the cache
+		index := (addr >> 2) & 3
+		instruction := Instruction(valU32)
+		line.Set(index, instruction)
+	}
+}
+
 // Store 32 bit value into memory
 func (cpu *CPU) Store32(addr, val uint32) {
-	cpu.Debugger.memoryWrite(addr)
-	cpu.Inter.Store32(addr, val)
+	cpu.Store(addr, ACCESS_WORD, val)
 }
 
 // Store 16 bit value into memory
 func (cpu *CPU) Store16(addr uint32, val uint16) {
-	cpu.Debugger.memoryWrite(addr)
-	cpu.Inter.Store16(addr, val)
+	cpu.Store(addr, ACCESS_HALFWORD, val)
 }
 
 // Store 8 bit value into memory
 func (cpu *CPU) Store8(addr uint32, val uint8) {
-	cpu.Debugger.memoryWrite(addr)
-	cpu.Inter.Store8(addr, val)
+	cpu.Store(addr, ACCESS_BYTE, val)
 }
 
 // Decodes and executes an instruction. Panics if the instruction is unhandled
@@ -323,12 +398,6 @@ func (cpu *CPU) OpANDI(instruction Instruction) {
 
 // Store Word
 func (cpu *CPU) OpSW(instruction Instruction) {
-	if cpu.SR&0x10000 != 0 {
-		// cache is isolated, ignore write
-		// fmt.Println("cpu (sw): ignoring store while cache is isolated")
-		return
-	}
-
 	i := instruction.ImmSE()
 	t := instruction.T()
 	s := instruction.S()
@@ -439,7 +508,7 @@ func (cpu *CPU) OpMTC0(instruction Instruction) {
 			panicFmt("cpu: unhandled write of 0x%x to cop0r%d", v, copR)
 		}
 	case 12: // status register
-		cpu.SR = v
+		cpu.SR = StatusRegister(v)
 	case 13: // cause register
 		if v != 0 {
 			panicFmt("cpu: unhandled write of 0x%x to CAUSE register", v)
@@ -467,12 +536,6 @@ func (cpu *CPU) OpADDI(instruction Instruction) {
 
 // Load Word
 func (cpu *CPU) OpLW(instruction Instruction) {
-	if cpu.SR&0x10000 != 0 {
-		// cache is isolated, ignore write
-		// fmt.Println("cpu (lw): ignoring store while cache is isolated")
-		return
-	}
-
 	i := instruction.ImmSE()
 	t := instruction.T()
 	s := instruction.S()
@@ -517,11 +580,6 @@ func (cpu *CPU) OpADDU(instruction Instruction) {
 
 // Store Halfword
 func (cpu *CPU) OpSH(instruction Instruction) {
-	if cpu.SR&0x10000 != 0 {
-		// fmt.Println("cpu (sh): ignoring store while cache is isolated")
-		return
-	}
-
 	i := instruction.ImmSE()
 	t := instruction.T()
 	s := instruction.S()
@@ -548,11 +606,6 @@ func (cpu *CPU) OpJAL(instruction Instruction) {
 
 // Store Byte
 func (cpu *CPU) OpSB(instruction Instruction) {
-	if cpu.SR&0x10000 != 0 {
-		// fmt.Println("cpu (sb): ignoring store while cache is isolated")
-		return
-	}
-
 	i := instruction.ImmSE()
 	t := instruction.T()
 	s := instruction.S()
@@ -616,7 +669,7 @@ func (cpu *CPU) OpMFC0(instruction Instruction) {
 	var v uint32
 	switch copR {
 	case 12:
-		v = cpu.SR
+		v = uint32(cpu.SR)
 	case 13: // cause register
 		v = cpu.Cause
 	case 14:
@@ -858,24 +911,8 @@ func (cpu *CPU) SetReg(index, val uint32) {
 
 // Trigger an exception
 func (cpu *CPU) Exception(cause Exception) {
-	// exception handler address depends on the BEV bit
-	var handler uint32
-	if cpu.SR&(1<<22) != 0 {
-		handler = 0xbfc00180
-	} else {
-		handler = 0x80000080
-	}
-
-	// shift bits [5:0] of the SR two places to the left.
-	// those bits are three pairs of Interrupt Enable/User Mode
-	// bits behaving like a stack of 3 entries deep. Entering an
-	// exception pushes a pair of zeroes by left shifting the stack
-	// which disables interrupts and puts the CPU in kernel mode.
-	// The original third entry is discarded (it's up to the kernel
-	// to handle more than two recursive exception levels)
-	mode := cpu.SR & 0x3f
-	cpu.SR = uint32(int32(cpu.SR) & ^0x3f)
-	cpu.SR |= (mode << 2) & 0x3f
+	// update the status register
+	cpu.SR.EnterException()
 
 	// update CAUSE register with the exception code (bits [6:2])
 	cpu.Cause = uint32(cause) << 2
@@ -892,7 +929,7 @@ func (cpu *CPU) Exception(cause Exception) {
 
 	// exceptions don't have a branch delay, jump directly into
 	// the handler
-	cpu.PC = handler
+	cpu.PC = cpu.SR.ExceptionHandler()
 	cpu.NextPC = cpu.PC + 4
 }
 
@@ -925,7 +962,7 @@ func (cpu *CPU) OpRFE(instruction Instruction) {
 	// restore the pre-exception mode by shifting the Interrupt
 	// Enable/User Mode stack back to its original position
 	mode := cpu.SR & 0x3f
-	cpu.SR = uint32(int32(cpu.SR) & ^0x3f)
+	cpu.SR = StatusRegister(int32(cpu.SR) & ^0x3f)
 	cpu.SR |= mode >> 2
 }
 
