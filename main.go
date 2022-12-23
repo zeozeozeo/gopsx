@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -23,6 +24,9 @@ var (
 	showFps       *bool
 	showCycles    *bool
 	cpu           *emulator.CPU
+	didPanic      bool
+	panicString   string
+	doRecover     *bool
 )
 
 type ebitenGame struct {
@@ -45,6 +49,11 @@ func (g *ebitenGame) Draw(screen *ebiten.Image) {
 
 	wg.Wait()
 	screen.DrawImage(currentFrame, op)
+
+	// draw error message if there was a panic
+	if didPanic {
+		ebitenutil.DebugPrintAt(screen, panicString, 8, 48)
+	}
 }
 
 func (g *ebitenGame) Layout(insideWidth, insideHeight int) (int, int) {
@@ -91,9 +100,8 @@ func main() {
 	biosPath := flag.String("bios", "SCPH1001.BIN", "path to the BIOS file")
 	showFps = flag.Bool("fps", true, "show FPS value")
 	showCycles = flag.Bool("cycles", true, "show amount of CPU cycles")
+	doRecover = flag.Bool("recover", true, "recover from emulator panics")
 	flag.Parse()
-
-	fmt.Println(*showFps)
 
 	g := &ebitenGame{}
 	go startEmulator(g, *biosPath)
@@ -108,6 +116,16 @@ func startEmulator(g *ebitenGame, biosPath string) {
 	gpu.SetFrameEnd(g.drawFrame)
 	inter := emulator.NewInterconnect(bios, ram, gpu)
 	cpu = emulator.NewCPU(inter)
+
+	defer func() {
+		if *doRecover {
+			if r := recover(); r != nil {
+				fmt.Printf("\nrecovered from panic: %s\n\n%s\n", r, debug.Stack())
+				didPanic = true
+				panicString = fmt.Sprintf("recovered from panic:\n%s", r)
+			}
+		}
+	}()
 
 	for {
 		cpu.RunNextInstruction()

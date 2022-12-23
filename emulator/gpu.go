@@ -402,6 +402,12 @@ func (gpu *GPU) GP0DrawingOffset() {
 	// shift the value to 16 bits to force sign extension
 	gpu.DrawingXOffset = (int16(x << 5)) >> 5
 	gpu.DrawingYOffset = (int16(y << 5)) >> 5
+
+	// HACK: this should be in gpu.Sync(), but currently it causes
+	// the screen to flicker
+	if gpu.FrameEnd != nil {
+		gpu.FrameEnd()
+	}
 }
 
 // GP0(0xE2): Set Texture Window
@@ -736,6 +742,7 @@ func (gpu *GPU) Sync(th *TimeHandler, irqState *IrqState) {
 		irqState.SetHigh(INTERRUPT_VBLANK)
 	}
 
+	/* temporarily moved to GP0DrawingOffset
 	if gpu.VBlankInterrupt && !vblankInterrupt {
 		// end of vertical blanking, do the FrameEnd callback
 		// TODO: the FrameEnd() call here causes the screen to flicker
@@ -743,6 +750,7 @@ func (gpu *GPU) Sync(th *TimeHandler, irqState *IrqState) {
 			gpu.FrameEnd()
 		}
 	}
+	*/
 
 	gpu.VBlankInterrupt = vblankInterrupt
 	gpu.PredictNextSync(th)
