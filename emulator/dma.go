@@ -102,7 +102,9 @@ func (dma *DMA) Interrupt() uint32 {
 }
 
 // Set the value of the interrupt register
-func (dma *DMA) SetInterrupt(val uint32) {
+func (dma *DMA) SetInterrupt(val uint32, irqState *IrqState) {
+	prevIrq := dma.Irq()
+
 	// unknown what bits [5:0] do
 	dma.IrqDummy = uint8(val & 0x3f)
 	dma.ForceIrq = (val>>15)&1 != 0
@@ -112,4 +114,21 @@ func (dma *DMA) SetInterrupt(val uint32) {
 	// writing 1 to a flag resets it
 	ack := uint8((val >> 24) & 0x3f)
 	dma.ChannelIrqFlags &= ^ack
+
+	if !prevIrq && dma.Irq() {
+		irqState.SetHigh(INTERRUPT_DMA)
+	}
+}
+
+func (dma *DMA) Done(port Port, irqState *IrqState) {
+	dma.Channels[port].Done()
+	prevIrq := dma.Irq()
+
+	// set interrupt flag if it's disabled
+	itEn := dma.ChannelIrqEn & (1 << uint8(port))
+	dma.ChannelIrqFlags |= itEn
+
+	if !prevIrq && dma.Irq() {
+		irqState.SetHigh(INTERRUPT_DMA)
+	}
 }

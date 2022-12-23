@@ -401,7 +401,6 @@ func (gpu *GPU) GP0DrawingOffset() {
 	// shift the value to 16 bits to force sign extension
 	gpu.DrawingXOffset = (int16(x << 5)) >> 5
 	gpu.DrawingYOffset = (int16(y << 5)) >> 5
-
 }
 
 // GP0(0xE2): Set Texture Window
@@ -421,12 +420,12 @@ func (gpu *GPU) GP0MaskBitSetting() {
 }
 
 // Handle writes to the GP1 command register
-func (gpu *GPU) GP1(val uint32, th *TimeHandler) {
+func (gpu *GPU) GP1(val uint32, th *TimeHandler, irqState *IrqState) {
 	opcode := (val >> 24) & 0xff
 
 	switch opcode {
 	case 0x00:
-		gpu.GP1Reset(th)
+		gpu.GP1Reset(th, irqState)
 	case 0x01:
 		gpu.GP1ResetCommandBuffer()
 	case 0x02:
@@ -440,16 +439,16 @@ func (gpu *GPU) GP1(val uint32, th *TimeHandler) {
 	case 0x06:
 		gpu.GP1DisplayHorizontalRange(val)
 	case 0x07:
-		gpu.GP1DisplayVerticalRange(val, th)
+		gpu.GP1DisplayVerticalRange(val, th, irqState)
 	case 0x08:
-		gpu.GP1DisplayMode(val, th)
+		gpu.GP1DisplayMode(val, th, irqState)
 	default:
 		panicFmt("gpu: unhandled GP1 command 0x%x", val)
 	}
 }
 
 // GP1(0x00): soft reset
-func (gpu *GPU) GP1Reset(th *TimeHandler) {
+func (gpu *GPU) GP1Reset(th *TimeHandler, irqState *IrqState) {
 	gpu.PageBaseX = 0
 	gpu.PageBaseY = 0
 	gpu.SemiTransparency = 0
@@ -491,13 +490,13 @@ func (gpu *GPU) GP1Reset(th *TimeHandler) {
 	gpu.DrawingYOffset = 0
 	gpu.GP1ResetCommandBuffer()
 	gpu.GP1AcknowledgeIrq()
-	gpu.Sync(th)
+	gpu.Sync(th, irqState)
 	// FIXME: should also clear the FIFO when it's implemented
 	// FIXME: should also invalidate GPU cache when it's implemented
 }
 
 // GP1(0x80): display mode
-func (gpu *GPU) GP1DisplayMode(val uint32, th *TimeHandler) {
+func (gpu *GPU) GP1DisplayMode(val uint32, th *TimeHandler, irqState *IrqState) {
 	hr1 := uint8(val & 3)
 	hr2 := uint8((val >> 6) & 1)
 
@@ -530,7 +529,7 @@ func (gpu *GPU) GP1DisplayMode(val uint32, th *TimeHandler) {
 		panicFmt("gpu: unsupported display mode 0x%x", val)
 	}
 
-	gpu.Sync(th)
+	gpu.Sync(th, irqState)
 }
 
 // GP1(0x04): DMA direction
@@ -562,10 +561,10 @@ func (gpu *GPU) GP1DisplayHorizontalRange(val uint32) {
 }
 
 // GP1(0x07): Display Vertical Range
-func (gpu *GPU) GP1DisplayVerticalRange(val uint32, th *TimeHandler) {
+func (gpu *GPU) GP1DisplayVerticalRange(val uint32, th *TimeHandler, irqState *IrqState) {
 	gpu.DisplayLineStart = uint16(val & 0x3ff)
 	gpu.DisplayLineEnd = uint16((val >> 10) & 0x3ff)
-	gpu.Sync(th)
+	gpu.Sync(th, irqState)
 }
 
 // GP1(0x03): Display Enable
@@ -696,7 +695,7 @@ func (gpu *GPU) InVBlank() bool {
 }
 
 // Synchronizes the GPU state
-func (gpu *GPU) Sync(th *TimeHandler) {
+func (gpu *GPU) Sync(th *TimeHandler, irqState *IrqState) {
 	delta := th.Sync(PERIPHERAL_GPU)
 	delta = uint64(gpu.ClockFrac) + delta*gpu.GPUToCPUClockRatio()
 
@@ -730,15 +729,13 @@ func (gpu *GPU) Sync(th *TimeHandler) {
 
 	vblankInterrupt := gpu.InVBlank()
 
-	/* FIXME
 	if !gpu.VBlankInterrupt && vblankInterrupt {
-		// should trigger an interrupt in the controller
-		fmt.Println("gpu: interrupt")
+		irqState.SetHigh(INTERRUPT_VBLANK)
 	}
-	*/
 
 	if gpu.VBlankInterrupt && !vblankInterrupt {
 		// end of vertical blanking, do the FrameEnd callback
+		// TODO: the FrameEnd() call here causes the screen to flicker
 		if gpu.FrameEnd != nil {
 			gpu.FrameEnd()
 		}
@@ -800,8 +797,8 @@ func (gpu *GPU) DisplayedVRamLine() uint16 {
 	return (gpu.DisplayVRamYStart + offset) & 0x1ff
 }
 
-func (gpu *GPU) Load(offset uint32, th *TimeHandler) uint32 {
-	gpu.Sync(th)
+func (gpu *GPU) Load(offset uint32, th *TimeHandler, irqState *IrqState) uint32 {
+	gpu.Sync(th, irqState)
 
 	switch offset {
 	case 0:
@@ -814,14 +811,14 @@ func (gpu *GPU) Load(offset uint32, th *TimeHandler) uint32 {
 	return 0
 }
 
-func (gpu *GPU) Store(offset uint32, val uint32, th *TimeHandler) {
-	gpu.Sync(th)
+func (gpu *GPU) Store(offset uint32, val uint32, th *TimeHandler, irqState *IrqState) {
+	gpu.Sync(th, irqState)
 
 	switch offset {
 	case 0:
 		gpu.GP0(val)
 	case 4:
-		gpu.GP1(val, th)
+		gpu.GP1(val, th, irqState)
 	default:
 		panicFmt("gpu: unhandled GPU write 0x%x <- 0x%x\n", offset, val)
 	}

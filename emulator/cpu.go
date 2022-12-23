@@ -27,16 +27,12 @@ type CPU struct {
 	// Set if the current instruction executes in the delay slot
 	DelaySlot bool
 
-	// COP0 register 12: Status Register
-	SR StatusRegister
+	Cop0 *Cop0 // Coprocessor 0: System Control
 	// HI register for division remainder and multiplication high result
 	Hi uint32
 	// LO register for division quotient and multiplication low result
 	Lo uint32
 	// Cop0 register 13: Cause Register
-	Cause uint32
-	// Cop0 register 14: EPC
-	Epc      uint32
 	Debugger *Debugger
 	// Instruction Cache (256 cache lines)
 	ICache [0x100]*ICacheLine
@@ -55,6 +51,7 @@ func NewCPU(inter *Interconnect) *CPU {
 		Lo:       0xdeadbeef, // junk
 		Debugger: NewDebugger(),
 		Th:       NewTimeHandler(),
+		Cop0:     NewCop0(),
 	}
 
 	// initialize registers to 0..32 (the values are not initialized on reset,
@@ -115,7 +112,12 @@ func (cpu *CPU) RunNextInstruction() {
 	cpu.DelaySlot = cpu.BranchOccured
 	cpu.BranchOccured = false
 
-	cpu.DecodeAndExecute(instruction)
+	if cpu.Cop0.IrqActive(cpu.Inter.IrqState) {
+		cpu.Exception(EXCEPTION_INTERRUPT)
+	} else {
+		// no interrupts pending
+		cpu.DecodeAndExecute(instruction)
+	}
 
 	// copy the output registers as input for the next instruction
 	// FIXME: this is copying 128 bytes of registers for each instruction,
@@ -181,7 +183,7 @@ func (cpu *CPU) Load8(addr uint32) byte {
 }
 
 func (cpu *CPU) Store(addr uint32, size AccessSize, val interface{}) {
-	if cpu.SR.CacheIsolated() {
+	if cpu.Cop0.CacheIsolated() {
 		cpu.CacheMaintenance(addr, size, val)
 	} else {
 		cpu.Debugger.memoryWrite(addr)
@@ -523,7 +525,7 @@ func (cpu *CPU) OpMTC0(instruction Instruction) {
 			panicFmt("cpu: unhandled write of 0x%x to cop0r%d", v, copR)
 		}
 	case 12: // status register
-		cpu.SR = StatusRegister(v)
+		cpu.Cop0.SetSR(v)
 	case 13: // cause register
 		if v != 0 {
 			panicFmt("cpu: unhandled write of 0x%x to CAUSE register", v)
@@ -684,11 +686,11 @@ func (cpu *CPU) OpMFC0(instruction Instruction) {
 	var v uint32
 	switch copR {
 	case 12:
-		v = uint32(cpu.SR)
+		v = cpu.Cop0.SR
 	case 13: // cause register
-		v = cpu.Cause
-	case 14:
-		v = cpu.Epc
+		v = cpu.Cop0.Cause
+	case 14: // exception PC
+		v = cpu.Cop0.Epc
 	default:
 		panicFmt("cpu: unhandled read from cop0r%d", copR)
 	}
@@ -926,25 +928,11 @@ func (cpu *CPU) SetReg(index, val uint32) {
 
 // Trigger an exception
 func (cpu *CPU) Exception(cause Exception) {
-	// update the status register
-	cpu.SR.EnterException()
-
-	// update CAUSE register with the exception code (bits [6:2])
-	cpu.Cause = uint32(cause) << 2
-
-	// save current instruction address in EPC
-	cpu.Epc = cpu.CurrentPC
-
-	if cpu.DelaySlot {
-		// when an exception occurs in a delay slot, EPC points to
-		// the branch instruction and bit 31 of CAUSE is set
-		cpu.Epc -= 4
-		cpu.Cause |= 1 << 31
-	}
+	handlerAddr := cpu.Cop0.EnterException(cause, cpu.CurrentPC, cpu.DelaySlot)
 
 	// exceptions don't have a branch delay, jump directly into
 	// the handler
-	cpu.PC = cpu.SR.ExceptionHandler()
+	cpu.PC = handlerAddr
 	cpu.NextPC = cpu.PC + 4
 }
 
@@ -974,11 +962,7 @@ func (cpu *CPU) OpRFE(instruction Instruction) {
 		panicFmt("cpu: invalid cop0 rfe instruction 0x%x", instruction)
 	}
 
-	// restore the pre-exception mode by shifting the Interrupt
-	// Enable/User Mode stack back to its original position
-	mode := cpu.SR & 0x3f
-	cpu.SR = StatusRegister(int32(cpu.SR) & ^0x3f)
-	cpu.SR |= mode >> 2
+	cpu.Cop0.ReturnFromException()
 }
 
 // Load Halfword Unsigned

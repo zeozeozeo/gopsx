@@ -159,5 +159,4 @@ func (ch *Channel) TransferSize() (valid bool, size uint32) {
 func (ch *Channel) Done() {
 	ch.Enable = false
 	ch.Trigger = false
-	// FIXME: need to set the correct value for the other fields (in particular interrupts)
 }

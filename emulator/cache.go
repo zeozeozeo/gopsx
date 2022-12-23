@@ -35,10 +35,10 @@ func (cline *ICacheLine) ValidIndex() uint32 {
 	return (cline.TagValid >> 2) & 0x7 // [4:2]
 }
 
-// Sets the cache line's tag and vali bits, `pc` is the first valid PC
+// Sets the cache line's tag and valid bits, `pc` is the first valid PC
 // in the cacheline
 func (cline *ICacheLine) SetTagValid(pc uint32) {
-	cline.TagValid = pc & 0xfffff00c
+	cline.TagValid = pc & 0x7ffff00c
 }
 
 // Invalidates the entire cache line

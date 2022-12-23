@@ -11,6 +11,7 @@ type Interconnect struct {
 	Dma       *DMA         // Direct Memory Access
 	Gpu       *GPU         // Graphics Processing Unit
 	CacheCtrl CacheControl // Cache Control register
+	IrqState  *IrqState    // Interrupt state
 }
 
 // Mask array used to strip the region bits of a CPU address. The mask
@@ -31,10 +32,11 @@ var REGION_MASK = [8]uint32{
 // Creates a new interconnect instance
 func NewInterconnect(bios *BIOS, ram *RAM, gpu *GPU) *Interconnect {
 	inter := &Interconnect{
-		Bios: bios,
-		Ram:  ram,
-		Dma:  NewDMA(),
-		Gpu:  gpu,
+		Bios:     bios,
+		Ram:      ram,
+		Dma:      NewDMA(),
+		Gpu:      gpu,
+		IrqState: NewIrqState(),
 	}
 	return inter
 }
@@ -50,14 +52,21 @@ func (inter *Interconnect) Load(addr uint32, size AccessSize, th *TimeHandler) i
 		return inter.Bios.Load(offset, size)
 	}
 	if ok, offset := IRQ_CONTROL.ContainsAndOffset(absAddr); ok {
-		fmt.Printf("inter: IRQ control read %d\n", offset)
-		return accessSizeU32(size, 0)
+		switch offset {
+		case 0: // interrupt status
+			return accessSizeU32(size, uint32(inter.IrqState.Status))
+		case 4: // interrupt mask
+			return accessSizeU32(size, uint32(inter.IrqState.Mask))
+		default:
+			panicFmt("inter: unhandled IRQ read at 0x%x", addr)
+		}
+		return 0
 	}
 	if ok, offset := DMA_RANGE.ContainsAndOffset(absAddr); ok {
 		return accessSizeU32(size, inter.DmaReg(offset))
 	}
 	if ok, offset := GPU_RANGE.ContainsAndOffset(absAddr); ok {
-		return inter.Gpu.Load(offset, th)
+		return inter.Gpu.Load(offset, th, inter.IrqState)
 	}
 	if ok, _ := TIMERS_RANGE.ContainsAndOffset(absAddr); ok {
 		// fmt.Printf("inter: unhandled read from timers register %d\n", offset)
@@ -103,7 +112,15 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}, 
 		return
 	}
 	if ok, offset := IRQ_CONTROL.ContainsAndOffset(addr); ok {
-		fmt.Printf("inter: ignoring IRQCONTROL: 0x%x <- 0x%x\n", offset, val)
+		valU32 := accessSizeToU32(size, val)
+		switch offset {
+		case 0:
+			inter.IrqState.Acknowledge(uint16(valU32))
+		case 4:
+			inter.IrqState.SetMask(uint16(valU32))
+		default:
+			panicFmt("inter: unhandled IRQ store at address 0x%x", addr)
+		}
 		return
 	}
 	if ok, offset := DMA_RANGE.ContainsAndOffset(absAddr); ok {
@@ -113,7 +130,7 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}, 
 	if ok, offset := GPU_RANGE.ContainsAndOffset(absAddr); ok {
 		// fmt.Printf("inter: GPU write 0x%x <- 0x%x\n", offset, val)
 		valU32 := accessSizeToU32(size, val)
-		inter.Gpu.Store(offset, valU32, th)
+		inter.Gpu.Store(offset, valU32, th, inter.IrqState)
 		return
 	}
 	if ok, offset := TIMERS_RANGE.ContainsAndOffset(absAddr); ok {
@@ -253,7 +270,7 @@ func (inter *Interconnect) SetDmaReg(offset, val uint32) {
 		case 0:
 			inter.Dma.SetControl(val)
 		case 4:
-			inter.Dma.SetInterrupt(val)
+			inter.Dma.SetInterrupt(val, inter.IrqState)
 		default:
 			panicFmt("inter: unhandled DMA write 0x%x <- 0x%x", offset, val)
 		}
@@ -279,6 +296,8 @@ func (inter *Interconnect) DoDma(port Port) {
 	default:
 		inter.DoDmaBlock(port)
 	}
+
+	inter.Dma.Done(port, inter.IrqState)
 }
 
 // Emulates DMA transfer for Manual and Request synchronization modes
@@ -345,8 +364,6 @@ func (inter *Interconnect) DoDmaBlock(port Port) {
 		}
 		remsz--
 	}
-
-	channel.Done()
 }
 
 // Emulate DMA transfer for linked list synchronization mode
@@ -391,14 +408,12 @@ func (inter *Interconnect) DoDmaLinkedList(port Port) {
 
 		addr = header & 0x1ffffc
 	}
-
-	channel.Done()
 }
 
 // Synchronizes all peripherals
 func (inter *Interconnect) Sync(th *TimeHandler) {
 	if th.NeedsSync(PERIPHERAL_GPU) {
-		inter.Gpu.Sync(th)
+		inter.Gpu.Sync(th, inter.IrqState)
 	}
 }
 
