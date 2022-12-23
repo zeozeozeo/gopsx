@@ -154,7 +154,8 @@ type GPU struct {
 	DisplayLine           uint16            // Currently displayed video output line
 	DisplayLineTick       uint16            // Current GPU clock tick for the current line
 	VBlankInterrupt       bool              // True if the VBLANK interrupt is high
-	Hardware              HardwareType
+	Hardware              HardwareType      // PAL or NTSC
+	ClockPhase            uint16            // Clock CPU/GPU time conversion in CPU periods
 }
 
 func NewGPU(hardware HardwareType) *GPU {
@@ -420,12 +421,13 @@ func (gpu *GPU) GP0MaskBitSetting() {
 }
 
 // Handle writes to the GP1 command register
-func (gpu *GPU) GP1(val uint32, th *TimeHandler, irqState *IrqState) {
+func (gpu *GPU) GP1(val uint32, th *TimeHandler, irqState *IrqState, timers *Timers) {
 	opcode := (val >> 24) & 0xff
 
 	switch opcode {
 	case 0x00:
 		gpu.GP1Reset(th, irqState)
+		timers.VideoTimingsChanged(th, irqState, gpu)
 	case 0x01:
 		gpu.GP1ResetCommandBuffer()
 	case 0x02:
@@ -442,6 +444,7 @@ func (gpu *GPU) GP1(val uint32, th *TimeHandler, irqState *IrqState) {
 		gpu.GP1DisplayVerticalRange(val, th, irqState)
 	case 0x08:
 		gpu.GP1DisplayMode(val, th, irqState)
+		timers.VideoTimingsChanged(th, irqState, gpu)
 	default:
 		panicFmt("gpu: unhandled GP1 command 0x%x", val)
 	}
@@ -656,7 +659,7 @@ func (gpu *GPU) SetFrameEnd(end func()) {
 }
 
 // Convert GPU clock ratio to CPU clock ratio
-func (gpu *GPU) GPUToCPUClockRatio() uint64 {
+func (gpu *GPU) GPUToCPUClockRatio() FracCycles {
 	// convert delta into GPU clock periods
 	var cpuClock float32 = 33.8685
 	var gpuClock float32
@@ -667,7 +670,7 @@ func (gpu *GPU) GPUToCPUClockRatio() uint64 {
 		gpuClock = 53.20
 	}
 
-	return uint64((gpuClock / cpuClock) * float32(CLOCK_RATIO_FRAC))
+	return FracCyclesFromF32(gpuClock / cpuClock)
 }
 
 // Returns the number of GPU clock cycles per line, and the number of lines
@@ -697,10 +700,10 @@ func (gpu *GPU) InVBlank() bool {
 // Synchronizes the GPU state
 func (gpu *GPU) Sync(th *TimeHandler, irqState *IrqState) {
 	delta := th.Sync(PERIPHERAL_GPU)
-	delta = uint64(gpu.ClockFrac) + delta*gpu.GPUToCPUClockRatio()
+	delta = uint64(gpu.ClockPhase) + delta*gpu.GPUToCPUClockRatio().GetFixed()
 
 	// the low 16 bits are the new fractional part
-	gpu.ClockFrac = uint16(delta)
+	gpu.ClockPhase = uint16(delta)
 	delta >>= 16 // make delta an integer again
 
 	ticksPerLine, linesPerFrame := gpu.GetVModeTimingsU64()
@@ -773,12 +776,12 @@ func (gpu *GPU) PredictNextSync(th *TimeHandler) {
 	}
 
 	// convert delta to CPU clock periods
-	delta *= CLOCK_RATIO_FRAC
+	delta <<= FracCyclesFracBits
 	// remove the current fractional cycle
-	delta -= uint64(gpu.ClockFrac)
+	delta -= uint64(gpu.ClockPhase)
 
 	// make sure we're never triggered too early
-	ratio := gpu.GPUToCPUClockRatio()
+	ratio := gpu.GPUToCPUClockRatio().GetFixed()
 	delta = (delta + ratio - 1) / ratio
 
 	th.SetNextSyncDelta(PERIPHERAL_GPU, delta)
@@ -811,15 +814,64 @@ func (gpu *GPU) Load(offset uint32, th *TimeHandler, irqState *IrqState) uint32 
 	return 0
 }
 
-func (gpu *GPU) Store(offset uint32, val uint32, th *TimeHandler, irqState *IrqState) {
+func (gpu *GPU) Store(offset uint32, val uint32, th *TimeHandler, irqState *IrqState, timers *Timers) {
 	gpu.Sync(th, irqState)
 
 	switch offset {
 	case 0:
 		gpu.GP0(val)
 	case 4:
-		gpu.GP1(val, th, irqState)
+		gpu.GP1(val, th, irqState, timers)
 	default:
 		panicFmt("gpu: unhandled GPU write 0x%x <- 0x%x\n", offset, val)
 	}
+}
+
+func (hres HorizontalRes) DotclockDivider() uint8 {
+	hr1 := (hres >> 1) & 0x3
+	hr2 := hres&1 != 0
+
+	if hr2 {
+		return 7 // ~368 pixels
+	} else {
+		switch hr1 {
+		case 0:
+			return 10 // ~256 pixels
+		case 1:
+			return 8 // ~320 pixels
+		case 2:
+			return 5 // ~512 pixels
+		case 3:
+			return 4 // ~640 pixels
+		default:
+			panic("gpu: unreachable")
+		}
+	}
+}
+
+// Period of the dotclock in CPU cycles
+func (gpu *GPU) DotclockPeriod() FracCycles {
+	gpuClockPeriod := gpu.GPUToCPUClockRatio()
+	dotclockDivider := gpu.HRes.DotclockDivider()
+
+	period := gpuClockPeriod.GetFixed() * uint64(dotclockDivider)
+	return FracCyclesFromFixed(period)
+}
+
+// Phase of the GPU dotclock relative to the CPU clock
+func (gpu *GPU) DotclockPhase() FracCycles {
+	return FracCyclesFromCycles(uint64(gpu.ClockPhase))
+}
+
+func (gpu *GPU) HSyncPeriod() FracCycles {
+	ticksPerLine, _ := gpu.GetVModeTimings()
+	lineLen := FracCyclesFromCycles(uint64(ticksPerLine))
+	return lineLen.Divide(gpu.GPUToCPUClockRatio()) // GPU to CPU cycles
+}
+
+func (gpu *GPU) HSyncPhase() FracCycles {
+	phase := FracCyclesFromCycles(uint64(gpu.DisplayLineTick))
+	clockPhase := FracCyclesFromFixed(uint64(gpu.ClockPhase))
+	phase = phase.Add(clockPhase)
+	return phase.Multiply(gpu.GPUToCPUClockRatio()) // GPU to CPU cycles
 }

@@ -17,23 +17,23 @@ const (
 )
 
 // DMA transfer synchronization mode
-type Sync uint32
+type DMASync uint32
 
 const (
 	// Transfer starts when the CPU writes to the Trigger bit and transfers
 	// everything at once
-	SYNC_MANUAL Sync = 0
+	SYNC_MANUAL DMASync = 0
 	// Sync blocks to DMA requests
-	SYNC_REQUEST Sync = 1
+	SYNC_REQUEST DMASync = 1
 	// Used to transfer GPU command lists
-	SYNC_LINKED_LIST Sync = 2
+	SYNC_LINKED_LIST DMASync = 2
 )
 
 type Channel struct {
 	Enable     bool
 	Direction  Direction
 	Step       Step
-	Sync       Sync
+	Sync       DMASync
 	Trigger    bool   // Used to start the DMA transfer when `Sync` is `SYNC_MANUAL`
 	Chop       bool   // If true, the DMA "chops" the transfer and lets the CPU run in the gaps
 	ChopDmaSz  uint8  // Chopping DMA window size (log2 number of words)

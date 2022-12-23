@@ -12,6 +12,7 @@ type Interconnect struct {
 	Gpu       *GPU         // Graphics Processing Unit
 	CacheCtrl CacheControl // Cache Control register
 	IrqState  *IrqState    // Interrupt state
+	Timers    *Timers      // System timers
 }
 
 // Mask array used to strip the region bits of a CPU address. The mask
@@ -37,6 +38,7 @@ func NewInterconnect(bios *BIOS, ram *RAM, gpu *GPU) *Interconnect {
 		Dma:      NewDMA(),
 		Gpu:      gpu,
 		IrqState: NewIrqState(),
+		Timers:   NewTimers(),
 	}
 	return inter
 }
@@ -68,10 +70,8 @@ func (inter *Interconnect) Load(addr uint32, size AccessSize, th *TimeHandler) i
 	if ok, offset := GPU_RANGE.ContainsAndOffset(absAddr); ok {
 		return inter.Gpu.Load(offset, th, inter.IrqState)
 	}
-	if ok, _ := TIMERS_RANGE.ContainsAndOffset(absAddr); ok {
-		// fmt.Printf("inter: unhandled read from timers register %d\n", offset)
-		// TODO
-		return accessSizeU32(size, 0)
+	if ok, offset := TIMERS_RANGE.ContainsAndOffset(absAddr); ok {
+		return inter.Timers.Load(size, th, offset)
 	}
 	if SPU_RANGE.Contains(absAddr) {
 		// ignore this for now (TODO)
@@ -130,11 +130,11 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}, 
 	if ok, offset := GPU_RANGE.ContainsAndOffset(absAddr); ok {
 		// fmt.Printf("inter: GPU write 0x%x <- 0x%x\n", offset, val)
 		valU32 := accessSizeToU32(size, val)
-		inter.Gpu.Store(offset, valU32, th, inter.IrqState)
+		inter.Gpu.Store(offset, valU32, th, inter.IrqState, inter.Timers)
 		return
 	}
 	if ok, offset := TIMERS_RANGE.ContainsAndOffset(absAddr); ok {
-		fmt.Printf("unhandled write to timer register %d <- 0x%x\n", offset, val)
+		inter.Timers.Store(size, val, th, offset, inter.Gpu, inter.IrqState)
 		return
 	}
 	if SPU_RANGE.Contains(absAddr) {

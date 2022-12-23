@@ -21,6 +21,8 @@ var (
 	prevFrameTime = time.Now()
 	deltaTime     float64
 	showFps       *bool
+	showCycles    *bool
+	cpu           *emulator.CPU
 )
 
 type ebitenGame struct {
@@ -68,6 +70,9 @@ func (g *ebitenGame) drawFrame() {
 	if *showFps {
 		ebitenutil.DebugPrintAt(currentFrame, fmt.Sprintf("%f fps", 1/deltaTime), 8, 8)
 	}
+	if *showCycles {
+		ebitenutil.DebugPrintAt(currentFrame, fmt.Sprintf("%d cycles", cpu.Th.Cycles), 8, 24)
+	}
 
 	prevFrameTime = time.Now()
 }
@@ -85,6 +90,7 @@ func main() {
 	// parse arguments
 	biosPath := flag.String("bios", "SCPH1001.BIN", "path to the BIOS file")
 	showFps = flag.Bool("fps", true, "show FPS value")
+	showCycles = flag.Bool("cycles", true, "show amount of CPU cycles")
 	flag.Parse()
 
 	fmt.Println(*showFps)
@@ -101,7 +107,7 @@ func startEmulator(g *ebitenGame, biosPath string) {
 	gpu = emulator.NewGPU(emulator.HARDWARE_NTSC)
 	gpu.SetFrameEnd(g.drawFrame)
 	inter := emulator.NewInterconnect(bios, ram, gpu)
-	cpu := emulator.NewCPU(inter)
+	cpu = emulator.NewCPU(inter)
 
 	for {
 		cpu.RunNextInstruction()

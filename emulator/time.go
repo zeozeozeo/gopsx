@@ -1,10 +1,13 @@
 package emulator
 
+import "math"
+
 // Keeps track of the emulation time
 type TimeHandler struct {
 	// Keeps track of the current execution time. It is measured in
 	// the CPU clock at 33.8685MHz (~29.525960700946ns)
 	Cycles     uint64
+	NextSync   uint64 // Next time a peripheral needs to be synchronized
 	TimeSheets []*TimeSheet
 }
 
@@ -12,13 +15,19 @@ type TimeHandler struct {
 type Peripheral uint32
 
 const (
-	PERIPHERAL_GPU Peripheral = 0 // Graphics Processing Unit
+	PERIPHERAL_GPU    Peripheral = iota // Graphics Processing Unit
+	PERIPHERAL_TIMER0 Peripheral = iota // Timer 0
+	PERIPHERAL_TIMER1 Peripheral = iota // Timer 1
+	PERIPHERAL_TIMER2 Peripheral = iota // Timer 2
 )
 
 // Returns a new instance of TimeHandler
 func NewTimeHandler() *TimeHandler {
 	th := &TimeHandler{
-		TimeSheets: []*TimeSheet{NewTimeSheet()},
+		NextSync: math.MaxUint64,
+	}
+	for i := 0; i < 4; i++ {
+		th.TimeSheets = append(th.TimeSheets, NewTimeSheet())
 	}
 	return th
 }
@@ -34,7 +43,34 @@ func (th *TimeHandler) Sync(from Peripheral) uint64 {
 }
 
 func (th *TimeHandler) SetNextSyncDelta(from Peripheral, delta uint64) {
-	th.TimeSheets[from].NextSync = th.Cycles + delta
+	at := th.Cycles + delta
+	th.TimeSheets[from].NextSync = at
+
+	if at < th.NextSync {
+		th.NextSync = at
+	}
+}
+
+// Called when there's no event scheduled
+func (th *TimeHandler) RemoveNextSync(from Peripheral) {
+	th.TimeSheets[from].NextSync = math.MaxUint64
+}
+
+// Returns true if a peripheral needs to be synchronized
+func (th *TimeHandler) ShouldSync() bool {
+	return th.NextSync <= th.Cycles
+}
+
+func (th *TimeHandler) UpdatePendingSync() {
+	// find minimum next sync value
+	var min uint64 = math.MaxUint64
+	for _, sheet := range th.TimeSheets {
+		if sheet.NextSync < min {
+			min = sheet.NextSync
+		}
+	}
+
+	th.NextSync = min
 }
 
 // Returns true if the peripheral reached the time of the next forced
@@ -65,4 +101,47 @@ func (sheet *TimeSheet) Sync(cycles uint64) uint64 {
 // Returns true if the peripheral reached `NextSync`
 func (sheet *TimeSheet) NeedsSync(cycles uint64) bool {
 	return sheet.NextSync <= cycles
+}
+
+type FracCycles uint64
+
+// The amount of fixed point fractional bits
+const FracCyclesFracBits uint64 = 16
+
+func FracCyclesFromFixed(fixed uint64) FracCycles {
+	return FracCycles(fixed)
+}
+
+func FracCyclesFromCycles(cycles uint64) FracCycles {
+	return FracCycles(cycles << FracCyclesFracBits)
+}
+
+func FracCyclesFromF32(val float32) FracCycles {
+	precision := float32(1 << FracCyclesFracBits)
+	return FracCycles(uint64(val * precision))
+}
+
+func (fc FracCycles) GetFixed() uint64 {
+	return uint64(fc)
+}
+
+func (fc FracCycles) Add(val FracCycles) FracCycles {
+	return FracCycles(fc.GetFixed() + val.GetFixed())
+}
+
+func (fc FracCycles) Multiply(val FracCycles) FracCycles {
+	v := fc.GetFixed() * val.GetFixed()
+	// the shift amount is doubled after multiplication
+	return FracCycles(v >> FracCyclesFracBits)
+}
+
+func (fc FracCycles) Divide(denominator FracCycles) FracCycles {
+	numerator := fc.GetFixed() << FracCyclesFracBits
+	return FracCycles(numerator / denominator.GetFixed())
+}
+
+func (fc FracCycles) Ceil() uint64 {
+	shift := FracCyclesFracBits
+	var align uint64 = (1 << shift) - 1
+	return (uint64(fc) + align) >> shift
 }
