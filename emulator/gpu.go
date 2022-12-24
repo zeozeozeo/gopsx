@@ -619,11 +619,11 @@ func (gpu *GPU) Status() uint32 {
 	r |= oneIfTrue(gpu.GP0Interrupt) << 24
 
 	// for now, we pretend that the GPU is always ready:
-	// ready to recieve command
+	// ready to receive command
 	r |= 1 << 26
 	// ready to send VRAM to CPU
 	r |= 1 << 27
-	// ready to recieve DMA block
+	// ready to receive DMA block
 	r |= 1 << 28
 
 	r |= uint32(gpu.DmaDirection) << 29

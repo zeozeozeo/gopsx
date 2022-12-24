@@ -398,7 +398,7 @@ func (inter *Interconnect) DoDmaLinkedList(port Port) {
 			remsz--
 		}
 
-		// the end of table marker is ususally 0xffffff, but mednafen
+		// the end of table marker is usually 0xffffff, but mednafen
 		// only checks for the MSB so maybe that's what the hardware does?
 		// Since this bit is not part of any valid address it makes some sense.
 		// TODO: test this

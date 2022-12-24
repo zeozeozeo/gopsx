@@ -67,7 +67,7 @@ func (cop *Cop0) ReturnFromException() {
 }
 
 func (cop *Cop0) IrqEnabled() bool {
-	return cop.SR & 1 != 0
+	return cop.SR&1 != 0
 }
 
 func (cop *Cop0) IrqActive(irqState *IrqState) bool {
@@ -75,6 +75,6 @@ func (cop *Cop0) IrqActive(irqState *IrqState) bool {
 
 	// bits [8:9] contain two software interrupts
 	pending := (cause & cop.SR) & 0x700
-	
+
 	return cop.IrqEnabled() && pending != 0
 }

@@ -21,7 +21,7 @@ type CPU struct {
 	Load [2]uint32
 	// Memory interface
 	Inter *Interconnect
-	// Set by the current instruction if a branch occured and the next instruction
+	// Set by the current instruction if a branch occurred and the next instruction
 	// will be in the delay slot
 	BranchOccured bool
 	// Set if the current instruction executes in the delay slot
@@ -81,7 +81,7 @@ func (cpu *CPU) RunNextInstruction() {
 	// debugger entrypoint
 	cpu.Debugger.changedPc(pc)
 
-	// FIXME: there's no need to check if PC is incorectly aligned for each instruction,
+	// FIXME: there's no need to check if PC is incorrectly aligned for each instruction,
 	//        instead we could make jump and branch instructions not capable of setting
 	//        unaligned PC addresses
 	if cpu.CurrentPC%4 != 0 {
