@@ -16,6 +16,12 @@ func (cop *Cop0) SetSR(sr uint32) {
 	cop.SR = sr
 }
 
+func (cop *Cop0) SetCause(val uint32) {
+	// triggers an interrupt
+	cop.Cause = uint32(int64(cop.Cause) & ^0x300)
+	cop.Cause |= val & 0x300
+}
+
 // Returns value of the cause register
 func (cop *Cop0) GetCause(irqState *IrqState) uint32 {
 	// bit 10 is the current external interrupt

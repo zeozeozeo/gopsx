@@ -517,19 +517,17 @@ func (cpu *CPU) OpMTC0(instruction Instruction) {
 	cpuR := instruction.T()
 	copR := instruction.D()
 
-	v := cpu.Reg(cpuR)
+	val := cpu.Reg(cpuR)
 
 	switch copR {
 	case 3, 5, 6, 7, 9, 11: // breakpoints registers
-		if v != 0 {
-			panicFmt("cpu: unhandled write of 0x%x to cop0r%d", v, copR)
+		if val != 0 {
+			panicFmt("cpu: unhandled write of 0x%x to cop0r%d", val, copR)
 		}
 	case 12: // status register
-		cpu.Cop0.SetSR(v)
+		cpu.Cop0.SetSR(val)
 	case 13: // cause register
-		if v != 0 {
-			panicFmt("cpu: unhandled write of 0x%x to CAUSE register", v)
-		}
+		cpu.Cop0.SetCause(val)
 	default:
 		panicFmt("cpu: unhandled cop0 register 0x%x", copR)
 	}
