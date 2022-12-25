@@ -80,7 +80,7 @@ func TSyncFromField(field uint16) TSync {
 type Timer struct {
 	Instance Peripheral // 0, 1 or 2
 	Counter  uint16     // Timer counter
-	FreeRun  bool       // If true, the timer synchronizes with an external signal
+	FreeRun  bool       // If true, the timer does not synchronize with an external signal
 	Target   uint16     // Timer counter target
 	TSync    TSync      // Synchronization mode when `FreeRun` is false
 	// If true, the counter is reset when it reaches `Target`, otherwise it counts to 0xffff
