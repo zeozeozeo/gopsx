@@ -237,7 +237,7 @@ func (cpu *CPU) Store8(addr uint32, val uint8) {
 
 // Decodes and executes an instruction. Panics if the instruction is unhandled
 func (cpu *CPU) DecodeAndExecute(instruction Instruction) {
-	// http://problemkaputt.de/psx-spx.htm#cpuopcodeencoding
+	// https://problemkaputt.de/psx-spx.htm#cpuopcodeencoding
 
 	// simulate instruction execution time
 	cpu.Th.Tick(1)

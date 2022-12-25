@@ -11,6 +11,7 @@ type Interrupt uint16
 
 const (
 	INTERRUPT_VBLANK Interrupt = 0 // GPU is in vertical blanking
+	INTERRUPT_CDROM  Interrupt = 2 // CD-ROM controller
 	INTERRUPT_DMA    Interrupt = 3 // DMA transfer complete
 )
 

@@ -97,6 +97,17 @@ func accessSizeToU16(size AccessSize, val interface{}) uint16 {
 	}
 }
 
+func accessSizeToU8(size AccessSize, val interface{}) uint8 {
+	switch size {
+	case ACCESS_BYTE:
+		return val.(byte)
+	case ACCESS_HALFWORD:
+		return uint8(val.(uint16))
+	default: // handles ACCESS_WORD and invalid cases
+		return uint8(val.(uint32))
+	}
+}
+
 func oneIfTrue(val bool) uint32 {
 	if val {
 		return 1

@@ -4,27 +4,29 @@ var (
 	// The range of the BIOS in the system memory
 	BIOS_RANGE = NewRange(0x1fc00000, BIOS_SIZE)
 	// Memory latency and expansion mapping (also known as SYSCONTROL)
-	MEM_CONTROL = NewRange(0x1f801000, 36)
+	MEMCONTROL_RANGE = NewRange(0x1f801000, 36)
 	// Register that has something to do with RAM configuration, configured by the BIOS
-	RAM_SIZE = NewRange(0x1f801060, 4)
+	RAMSIZE_RANGE = NewRange(0x1f801060, 4)
 	// Cache control register, full address since it's in KSEG2
-	CACHE_CONTROL = NewRange(0xfffe0130, 4)
+	CACHE_CONTROL_RANGE = NewRange(0xfffe0130, 4)
 	// Main RAM: 2MB mirrored four times over the first 8MB
 	RAM_RANGE = NewRange(0x00000000, 8*1024*1024)
 	// SPU (Sound Processing Unit)
 	SPU_RANGE = NewRange(0x1f801c00, 640)
 	// Expansion region 1
-	EXPANSION_1 = NewRange(0x1f000000, 512*1024)
+	EXPANSION_1_RANGE = NewRange(0x1f000000, 512*1024)
 	// Expansion region 2
-	EXPANSION_2 = NewRange(0x1f802000, 66)
+	EXPANSION_2_RANGE = NewRange(0x1f802000, 66)
 	// Interrupt Control registers (status and mask)
-	IRQ_CONTROL = NewRange(0x1f801070, 8)
+	IRQ_CONTROL_RANGE = NewRange(0x1f801070, 8)
 	// Timer registers
 	TIMERS_RANGE = NewRange(0x1f801100, 0x30)
 	// Direct Memory Access registers
 	DMA_RANGE = NewRange(0x1f801080, 0x80)
 	// GPU
-	GPU_RANGE = NewRange(0x1f801810, 8)
+	GPU_RANGE   = NewRange(0x1f801810, 8)
+	// The CD-ROM controller
+	CDROM_RANGE = NewRange(0x1f801800, 0x4)
 )
 
 type Range struct {

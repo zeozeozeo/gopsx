@@ -13,6 +13,7 @@ type Interconnect struct {
 	CacheCtrl CacheControl // Cache Control register
 	IrqState  *IrqState    // Interrupt state
 	Timers    *Timers      // System timers
+	CdRom     *CdRom       // CD-ROM controller
 }
 
 // Mask array used to strip the region bits of a CPU address. The mask
@@ -39,6 +40,7 @@ func NewInterconnect(bios *BIOS, ram *RAM, gpu *GPU) *Interconnect {
 		Gpu:      gpu,
 		IrqState: NewIrqState(),
 		Timers:   NewTimers(),
+		CdRom:    NewCdRom(),
 	}
 	return inter
 }
@@ -53,7 +55,7 @@ func (inter *Interconnect) Load(addr uint32, size AccessSize, th *TimeHandler) i
 	if ok, offset := BIOS_RANGE.ContainsAndOffset(absAddr); ok {
 		return inter.Bios.Load(offset, size)
 	}
-	if ok, offset := IRQ_CONTROL.ContainsAndOffset(absAddr); ok {
+	if ok, offset := IRQ_CONTROL_RANGE.ContainsAndOffset(absAddr); ok {
 		switch offset {
 		case 0: // interrupt status
 			return accessSizeU32(size, uint32(inter.IrqState.Status))
@@ -78,9 +80,12 @@ func (inter *Interconnect) Load(addr uint32, size AccessSize, th *TimeHandler) i
 		// fmt.Printf("inter: unhandled read from SPU register 0x%x\n", absAddr)
 		return accessSizeU32(size, 0)
 	}
-	if EXPANSION_1.Contains(absAddr) {
+	if EXPANSION_1_RANGE.Contains(absAddr) {
 		fmt.Printf("inter: ignoring read from expansion 1 0x%x\n", absAddr)
 		return accessSizeU32(size, 0)
+	}
+	if ok, offset := CDROM_RANGE.ContainsAndOffset(absAddr); ok {
+		return inter.CdRom.Load(size, offset)
 	}
 
 	panicFmt("inter: unhandled load at address 0x%x", addr)
@@ -95,7 +100,7 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}, 
 		inter.Ram.Store(offset, size, val)
 		return
 	}
-	if ok, offset := MEM_CONTROL.ContainsAndOffset(absAddr); ok {
+	if ok, offset := MEMCONTROL_RANGE.ContainsAndOffset(absAddr); ok {
 		valU32 := accessSizeToU32(size, val)
 		switch offset {
 		case 0: // expansion 1 base address
@@ -111,7 +116,7 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}, 
 		}
 		return
 	}
-	if ok, offset := IRQ_CONTROL.ContainsAndOffset(addr); ok {
+	if ok, offset := IRQ_CONTROL_RANGE.ContainsAndOffset(absAddr); ok {
 		valU32 := accessSizeToU32(size, val)
 		switch offset {
 		case 0:
@@ -142,17 +147,21 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}, 
 		// fmt.Printf("inter: unhandled write to SPU register at 0x%x\n", addr)
 		return
 	}
-	if CACHE_CONTROL.Contains(absAddr) {
+	if CACHE_CONTROL_RANGE.Contains(absAddr) {
 		valU32 := accessSizeToU32(size, val)
 		inter.CacheCtrl = CacheControl(valU32)
 		return
 	}
-	if RAM_SIZE.Contains(absAddr) {
+	if RAMSIZE_RANGE.Contains(absAddr) {
 		// ignore writes to this address
 		return
 	}
-	if ok, offset := EXPANSION_2.ContainsAndOffset(addr); ok {
+	if ok, offset := EXPANSION_2_RANGE.ContainsAndOffset(absAddr); ok {
 		fmt.Printf("inter: unhandled write to EXPANSION 2 register %d\n", offset)
+		return
+	}
+	if ok, offset := CDROM_RANGE.ContainsAndOffset(absAddr); ok {
+		inter.CdRom.Store(offset, size, accessSizeToU8(size, val), inter.IrqState)
 		return
 	}
 

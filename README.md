@@ -14,9 +14,9 @@
 
 # Status
 
-The CPU, RAM and the DMA are mostly implented (except for interrupts). The boot logo is being rendered correctly, but textures are not supported yet
+CPU, GPU, DMA, timers, CD-ROM and interrupts are partially implemented. The boot logo is being rendered correctly, but it doesn't have any textures yet
 
-![Boot animation](https://cdn.discordapp.com/attachments/783966433641365504/1055192963334021170/image.png)
+![Boot animation](https://cdn.discordapp.com/attachments/783966433641365504/1056596634600996864/image.png)
 
 # Thanks
 

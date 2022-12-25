@@ -12,7 +12,6 @@ func init() {
 	emptyImage.Fill(color.RGBA{255, 255, 255, 255})
 }
 
-// An Ebitengine renderer that implements Renderer
 type EbitenRenderer struct {
 	DrawData *DrawData
 	Gpu      *GPU
@@ -28,8 +27,7 @@ func (gpu *GPU) NewEbitenRenderer() *EbitenRenderer {
 }
 
 func (renderer *EbitenRenderer) Draw(screen *ebiten.Image) {
-	// generate Ebiten vertices from draw data (TODO: maybe there's
-	// a better way to do this?)
+	// generate Ebiten vertices from draw data
 	verticesLen := len(renderer.DrawData.VtxBuffer)
 	vertices := make([]ebiten.Vertex, verticesLen)
 	indices := make([]uint16, verticesLen)
@@ -43,10 +41,10 @@ func (renderer *EbitenRenderer) Draw(screen *ebiten.Image) {
 		y := float32(vtx.Position.Y + renderer.Gpu.DrawingYOffset)
 		vertices[idx].DstX = x
 		vertices[idx].DstY = y
-
-		// FIXME
-		vertices[idx].SrcX = 0
-		vertices[idx].SrcY = 0
+		/*
+			vertices[idx].SrcX = 0
+			vertices[idx].SrcY = 0
+		*/
 
 		indices[idx] = uint16(idx)
 	}

@@ -868,7 +868,8 @@ func (gpu *GPU) DotclockPeriod() FracCycles {
 
 // Phase of the GPU dotclock relative to the CPU clock
 func (gpu *GPU) DotclockPhase() FracCycles {
-	return FracCyclesFromCycles(uint64(gpu.ClockPhase))
+	panic("gpu: dotclock phase is not implemented")
+	// return FracCyclesFromCycles(uint64(gpu.ClockPhase))
 }
 
 func (gpu *GPU) HSyncPeriod() FracCycles {
