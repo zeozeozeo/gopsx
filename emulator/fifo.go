@@ -42,8 +42,9 @@ func (fifo *FIFO) Push(val uint8) {
 // Increments the read pointer of the FIFO and returns the value at
 // that pointer
 func (fifo *FIFO) Pop() uint8 {
+	idx := fifo.ReadPtr & 0xf
 	fifo.ReadPtr++
-	return fifo.Buffer[fifo.ReadPtr&0xf]
+	return fifo.Buffer[idx]
 }
 
 // Returns the amount of elements in the FIFO. The maximum value
