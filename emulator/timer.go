@@ -80,25 +80,21 @@ func TSyncFromField(field uint16) TSync {
 type Timer struct {
 	Instance Peripheral // 0, 1 or 2
 	Counter  uint16     // Timer counter
+	FreeRun  bool       // If true, the timer synchronizes with an external signal
 	Target   uint16     // Timer counter target
-	UseSync  bool       // If true, the timer synchronizes with an external signal
 	TSync    TSync      // Synchronization mode when `FreeRun` is false
 	// If true, the counter is reset when it reaches `Target`, otherwise it counts to 0xffff
-	TargetWrap       bool
-	TargetIrq        bool // Specifies whether to raise an interrupt when `Target` is reached
-	WrapIrq          bool // Raises an interrupt when `TargetIrq` wraps after 0xffff
-	RepeatIrq        bool // If true, the interrupt is automatically cleared
-	PulseIrq         bool // Not sure what this does
-	RequestInterrupt bool // Not sure what this does
-	// If true, the IRQ is inverted each time an interrupt condition is reached
-	NegateIrq       bool
+	TargetWrap      bool
+	TargetIrq       bool        // Specifies whether to raise an interrupt when `Target` is reached
+	WrapIrq         bool        // Raises an interrupt when `TargetIrq` wraps after 0xffff
+	RepeatIrq       bool        // If true, the interrupt is automatically cleared
+	NegateIrq       bool        // When true, the IRQ signal is inverted after each interrupt
 	ClockSource     ClockSource // Each timer can use a different clock source
 	TargetReached   bool        // True if `Target` has been reached since the last read
 	OverflowReached bool        // True when the counter overflowed 0xffff
 	Period          FracCycles  // Period of a counter tick, the GPU can be used as a source
 	Phase           FracCycles  // Current position in the counter tick
 	Interrupt       bool        // True if an interrupt is active
-	FreeRun         bool        // If true, the timer won't synchronize with an external signal
 }
 
 // Returns a new Timer instance
@@ -115,7 +111,7 @@ func NewTimer(instance Peripheral) *Timer {
 // Resets the timer internal state, gets called when the timer's
 // configuration changes or when GPU timings change (if the timer
 // relies on them)
-func (timer *Timer) Reset(gpu *GPU) {
+func (timer *Timer) Reset(gpu *GPU, th *TimeHandler) {
 	switch timer.ClockSource.Clock(timer.Instance) {
 	case CLOCK_SYSCLOCK:
 		timer.Period = FracCyclesFromCycles(1)
@@ -130,11 +126,17 @@ func (timer *Timer) Reset(gpu *GPU) {
 		timer.Period = gpu.HSyncPeriod()
 		timer.Phase = gpu.HSyncPhase()
 	}
+
+	timer.PredictNextSync(th)
 }
 
 // Synchronizes this timer
-func (timer *Timer) Sync(th *TimeHandler) {
+func (timer *Timer) Sync(th *TimeHandler, irqState *IrqState) {
 	delta := th.Sync(timer.Instance)
+	if delta == 0 {
+		return
+	}
+
 	deltaFrac := FracCyclesFromCycles(delta)
 	ticks := deltaFrac.Add(timer.Phase)
 
@@ -143,27 +145,60 @@ func (timer *Timer) Sync(th *TimeHandler) {
 
 	// update current phase
 	timer.Phase = FracCyclesFromFixed(phase)
+	count += uint64(timer.Counter)
+	targetPassed := false
 
-	var target uint64
-	if timer.TargetWrap {
-		// wrap after the target is reached
-		target = uint64(timer.Target) + 1
-	} else {
-		target = 0x10000
+	if (timer.Counter <= timer.Target) && (count > uint64(timer.Target)) {
+		timer.TargetReached = true
+		targetPassed = true
 	}
 
-	count += uint64(timer.Counter)
+	var wrap uint64
+	overflow := false
+	if timer.TargetWrap {
+		wrap = uint64(timer.Target) + 1
+	} else {
+		wrap = 0x10000
+	}
 
-	if count >= target {
-		count %= target
-		timer.TargetReached = true
+	if count >= wrap {
+		count %= wrap
 
-		if target == 0x10000 {
+		if wrap == 0x10000 {
 			timer.OverflowReached = true
+			overflow = true
 		}
 	}
 
 	timer.Counter = uint16(count)
+
+	if (timer.WrapIrq && overflow) || (timer.TargetIrq && targetPassed) {
+		var interrupt Interrupt
+		switch timer.Instance {
+		case PERIPHERAL_TIMER0:
+			interrupt = INTERRUPT_TIMER0
+		case PERIPHERAL_TIMER1:
+			interrupt = INTERRUPT_TIMER1
+		case PERIPHERAL_TIMER2:
+			interrupt = INTERRUPT_TIMER2
+		default:
+			panic("timer: unreachable")
+		}
+
+		if timer.NegateIrq {
+			// TODO
+			panic("timer: negate IRQ is not implemented")
+		} else {
+			// start pulse
+			irqState.SetHigh(interrupt)
+			timer.Interrupt = true
+		}
+	} else if !timer.NegateIrq {
+		// pulse is over
+		timer.Interrupt = false
+	}
+
+	timer.PredictNextSync(th)
 }
 
 // Returns the value of the mode register
@@ -176,9 +211,9 @@ func (timer *Timer) Mode() uint16 {
 	r |= uint16(oneIfTrue(timer.TargetIrq)) << 4
 	r |= uint16(oneIfTrue(timer.WrapIrq)) << 5
 	r |= uint16(oneIfTrue(timer.RepeatIrq)) << 6
-	r |= uint16(oneIfTrue(timer.PulseIrq)) << 7
+	r |= uint16(oneIfTrue(timer.NegateIrq)) << 7
 	r |= uint16(timer.ClockSource) << 8
-	r |= uint16(oneIfTrue(timer.RequestInterrupt)) << 10
+	r |= uint16(oneIfTrue(!timer.Interrupt)) << 10
 	r |= uint16(oneIfTrue(timer.TargetReached)) << 11
 	r |= uint16(oneIfTrue(timer.OverflowReached)) << 12
 
@@ -197,18 +232,21 @@ func (timer *Timer) SetMode(val uint16) {
 	timer.TargetIrq = (val>>4)&1 != 0
 	timer.WrapIrq = (val>>5)&1 != 0
 	timer.RepeatIrq = (val>>6)&1 != 0
-	timer.PulseIrq = (val>>7)&1 != 0
+	timer.NegateIrq = (val>>7)&1 != 0
 	timer.ClockSource = ClockSourceFromField((val >> 8) & 3)
-	timer.RequestInterrupt = (val>>10)&1 != 0
 
-	// writing resets the counter
+	// writing resets the counter and the interrupt flag
 	timer.Counter = 0
+	timer.Interrupt = false
 
-	if timer.RequestInterrupt {
-		panicFmt("timer (%d): unsupported IRQ request", timer.Instance)
+	if timer.WrapIrq {
+		panicFmt("timer (%d): WrapIrq is not implemented", timer.Instance)
+	}
+	if (timer.WrapIrq || timer.TargetIrq) && !timer.RepeatIrq {
+		panicFmt("timer (%d): unsupported pulse timer interrupt", timer.Instance)
 	}
 	if !timer.FreeRun {
-		panicFmt("timer (%d): non free-run mode is not supported", timer.Instance)
+		panicFmt("timer (%d): sync mode is not supported", timer.Instance)
 	}
 }
 
@@ -217,6 +255,31 @@ func (timer *Timer) NeedsGPU() bool {
 		panic("timer: sync mode not supported")
 	}
 	return timer.ClockSource.Clock(timer.Instance).NeedsGPU()
+}
+
+func (timer *Timer) PredictNextSync(th *TimeHandler) {
+	// TODO: add support for WrapIrq
+	if !timer.TargetIrq {
+		// we don't have an IRQ
+		th.RemoveNextSync(timer.Instance)
+		return
+	}
+
+	var countdown uint16
+	if timer.Counter <= timer.Target {
+		countdown = timer.Target - timer.Counter
+	} else {
+		countdown = 0xffff - timer.Counter + timer.Target
+	}
+
+	// convert timer counter to CPU cycles. the interrupt is generated
+	// on the next cycle, so we add 1 to it
+	delta := timer.Period.GetFixed() * (uint64(countdown) + 1)
+	delta -= timer.Phase.GetFixed()
+	// round to the next CPU cycle
+	delta = FracCyclesFromFixed(delta).Ceil()
+
+	th.SetNextSyncDelta(timer.Instance, delta)
 }
 
 type Timers struct {
@@ -237,14 +300,14 @@ func NewTimers() *Timers {
 	return timers
 }
 
-func (timers *Timers) Load(size AccessSize, th *TimeHandler, offset uint32) interface{} {
+func (timers *Timers) Load(size AccessSize, th *TimeHandler, offset uint32, irqState *IrqState) interface{} {
 	if size != ACCESS_WORD && size != ACCESS_HALFWORD {
 		panicFmt("timer: unsupported load size %d", size)
 	}
 
 	instance := offset >> 4
 	timer := timers.Timers[instance]
-	timer.Sync(th)
+	timer.Sync(th, irqState)
 
 	var val uint16
 	switch offset & 0xf {
@@ -276,7 +339,7 @@ func (timers *Timers) Store(
 	valU16 := accessSizeToU16(size, val)
 	instance := offset >> 4
 	timer := timers.Timers[instance]
-	timer.Sync(th)
+	timer.Sync(th, irqState)
 
 	switch offset & 0xf {
 	case 0:
@@ -292,14 +355,26 @@ func (timers *Timers) Store(
 	if timer.NeedsGPU() {
 		gpu.Sync(th, irqState)
 	}
-	timer.Reset(gpu)
+	timer.Reset(gpu, th)
 }
 
 func (timers *Timers) VideoTimingsChanged(th *TimeHandler, irqState *IrqState, gpu *GPU) {
 	for _, timer := range timers.Timers {
 		if timer.NeedsGPU() {
-			timer.Sync(th)
-			timer.Reset(gpu)
+			timer.Sync(th, irqState)
+			timer.Reset(gpu, th)
 		}
+	}
+}
+
+func (timers *Timers) Sync(th *TimeHandler, irqState *IrqState) {
+	if th.NeedsSync(PERIPHERAL_TIMER0) {
+		timers.Timers[0].Sync(th, irqState)
+	}
+	if th.NeedsSync(PERIPHERAL_TIMER1) {
+		timers.Timers[1].Sync(th, irqState)
+	}
+	if th.NeedsSync(PERIPHERAL_TIMER2) {
+		timers.Timers[2].Sync(th, irqState)
 	}
 }

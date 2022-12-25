@@ -13,6 +13,9 @@ const (
 	INTERRUPT_VBLANK Interrupt = 0 // GPU is in vertical blanking
 	INTERRUPT_CDROM  Interrupt = 2 // CD-ROM controller
 	INTERRUPT_DMA    Interrupt = 3 // DMA transfer complete
+	INTERRUPT_TIMER0 Interrupt = 4 // Timer 0 interrupt
+	INTERRUPT_TIMER1 Interrupt = 5 // Timer 0 interrupt
+	INTERRUPT_TIMER2 Interrupt = 6 // Timer 0 interrupt
 )
 
 // Returns a new interrupt instance

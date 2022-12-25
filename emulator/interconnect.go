@@ -73,7 +73,7 @@ func (inter *Interconnect) Load(addr uint32, size AccessSize, th *TimeHandler) i
 		return inter.Gpu.Load(offset, th, inter.IrqState)
 	}
 	if ok, offset := TIMERS_RANGE.ContainsAndOffset(absAddr); ok {
-		return inter.Timers.Load(size, th, offset)
+		return inter.Timers.Load(size, th, offset, inter.IrqState)
 	}
 	if SPU_RANGE.Contains(absAddr) {
 		// ignore this for now (TODO)
@@ -431,6 +431,8 @@ func (inter *Interconnect) Sync(th *TimeHandler) {
 	if th.NeedsSync(PERIPHERAL_GPU) {
 		inter.Gpu.Sync(th, inter.IrqState)
 	}
+
+	inter.Timers.Sync(th, inter.IrqState)
 }
 
 // Load instruction at `pc`

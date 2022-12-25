@@ -106,18 +106,18 @@ func (sheet *TimeSheet) NeedsSync(cycles uint64) bool {
 type FracCycles uint64
 
 // The amount of fixed point fractional bits
-const FracCyclesFracBits uint64 = 16
+const FRAC_CYCLES_FRAC_BITS uint64 = 16
 
 func FracCyclesFromFixed(fixed uint64) FracCycles {
 	return FracCycles(fixed)
 }
 
 func FracCyclesFromCycles(cycles uint64) FracCycles {
-	return FracCycles(cycles << FracCyclesFracBits)
+	return FracCycles(cycles << FRAC_CYCLES_FRAC_BITS)
 }
 
 func FracCyclesFromF32(val float32) FracCycles {
-	precision := float32(1 << FracCyclesFracBits)
+	precision := float32(1 << FRAC_CYCLES_FRAC_BITS)
 	return FracCycles(uint64(val * precision))
 }
 
@@ -132,16 +132,16 @@ func (fc FracCycles) Add(val FracCycles) FracCycles {
 func (fc FracCycles) Multiply(val FracCycles) FracCycles {
 	v := fc.GetFixed() * val.GetFixed()
 	// the shift amount is doubled after multiplication
-	return FracCycles(v >> FracCyclesFracBits)
+	return FracCycles(v >> FRAC_CYCLES_FRAC_BITS)
 }
 
 func (fc FracCycles) Divide(denominator FracCycles) FracCycles {
-	numerator := fc.GetFixed() << FracCyclesFracBits
+	numerator := fc.GetFixed() << FRAC_CYCLES_FRAC_BITS
 	return FracCycles(numerator / denominator.GetFixed())
 }
 
 func (fc FracCycles) Ceil() uint64 {
-	shift := FracCyclesFracBits
+	shift := FRAC_CYCLES_FRAC_BITS
 	var align uint64 = (1 << shift) - 1
 	return (uint64(fc) + align) >> shift
 }

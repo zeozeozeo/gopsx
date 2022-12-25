@@ -784,7 +784,7 @@ func (gpu *GPU) PredictNextSync(th *TimeHandler) {
 	}
 
 	// convert delta to CPU clock periods
-	delta <<= FracCyclesFracBits
+	delta <<= FRAC_CYCLES_FRAC_BITS
 	// remove the current fractional cycle
 	delta -= uint64(gpu.ClockPhase)
 

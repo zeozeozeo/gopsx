@@ -72,7 +72,10 @@ func NewCPU(inter *Interconnect) *CPU {
 // Runs the instruction at the program counter and increments it
 func (cpu *CPU) RunNextInstruction() {
 	// synchronize peripherals
-	cpu.Inter.Sync(cpu.Th)
+	if cpu.Th.ShouldSync() {
+		cpu.Inter.Sync(cpu.Th)
+		cpu.Th.UpdatePendingSync()
+	}
 
 	// save the address of the current instruction to save in EPC in case of an exception
 	pc := cpu.PC
