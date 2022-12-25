@@ -164,6 +164,13 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}, 
 		inter.CdRom.Store(offset, size, accessSizeToU8(size, val), inter.IrqState)
 		return
 	}
+	if CONTROLLER_MEMCARD_RANGE.Contains(absAddr) {
+		fmt.Printf(
+			"inter: unhandled write to controller/memcard 0x%x <- 0x%x\n",
+			absAddr, accessSizeToU32(size, val),
+		)
+		return
+	}
 
 	panicFmt(
 		"inter: unhandled write into address 0x%x (abs: 0x%x) <- 0x%x (%d bytes)",

@@ -24,9 +24,11 @@ var (
 	// Direct Memory Access registers
 	DMA_RANGE = NewRange(0x1f801080, 0x80)
 	// GPU
-	GPU_RANGE   = NewRange(0x1f801810, 8)
+	GPU_RANGE = NewRange(0x1f801810, 8)
 	// The CD-ROM controller
 	CDROM_RANGE = NewRange(0x1f801800, 0x4)
+	// Controller and memory card range
+	CONTROLLER_MEMCARD_RANGE = NewRange(0x1f801040, 32)
 )
 
 type Range struct {

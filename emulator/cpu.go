@@ -1121,7 +1121,7 @@ func (cpu *CPU) OpCOP3() {
 
 // Coprocessor 2 opcode (GTE)
 func (cpu *CPU) OpCOP2(instruction Instruction) {
-	panicFmt("cpu: unhandled GTE instruction %d", instruction)
+	panicFmt("cpu: unhandled GTE instruction 0x%x", instruction)
 }
 
 // Load Word Left (little-endian only implementation)

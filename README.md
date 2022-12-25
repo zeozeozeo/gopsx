@@ -16,7 +16,7 @@
 
 CPU, GPU, DMA, timers, CD-ROM and interrupts are partially implemented. The boot logo is being rendered correctly, but it doesn't have any textures yet
 
-![Boot animation](https://cdn.discordapp.com/attachments/783966433641365504/1056596634600996864/image.png)
+![Boot animation](https://cdn.discordapp.com/attachments/783966433641365504/1056610589515993178/image.png)
 
 # Thanks
 
