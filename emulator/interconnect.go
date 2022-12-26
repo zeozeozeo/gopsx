@@ -14,6 +14,7 @@ type Interconnect struct {
 	IrqState  *IrqState    // Interrupt state
 	Timers    *Timers      // System timers
 	CdRom     *CdRom       // CD-ROM controller
+	Gte       *GTE         // Geometry Transformation Engine (coprocessor 2)
 }
 
 // Mask array used to strip the region bits of a CPU address. The mask
@@ -41,6 +42,7 @@ func NewInterconnect(bios *BIOS, ram *RAM, gpu *GPU) *Interconnect {
 		IrqState: NewIrqState(),
 		Timers:   NewTimers(),
 		CdRom:    NewCdRom(),
+		Gte:      NewGTE(),
 	}
 	return inter
 }
@@ -48,6 +50,9 @@ func NewInterconnect(bios *BIOS, ram *RAM, gpu *GPU) *Interconnect {
 // Load value at `addr`
 func (inter *Interconnect) Load(addr uint32, size AccessSize, th *TimeHandler) interface{} {
 	absAddr := MaskRegion(addr)
+
+	// averate RAM load delay
+	th.Tick(5)
 
 	if ok, offset := RAM_RANGE.ContainsAndOffset(absAddr); ok {
 		return inter.Ram.Load(offset, size)
@@ -86,6 +91,10 @@ func (inter *Interconnect) Load(addr uint32, size AccessSize, th *TimeHandler) i
 	}
 	if ok, offset := CDROM_RANGE.ContainsAndOffset(absAddr); ok {
 		return inter.CdRom.Load(size, offset)
+	}
+	if CONTROLLER_MEMCARD_RANGE.Contains(absAddr) {
+		// FIXME: we ignore this for now
+		return accessSizeU32(size, 0)
 	}
 
 	panicFmt("inter: unhandled load at address 0x%x", addr)
@@ -366,6 +375,9 @@ func (inter *Interconnect) DoDmaBlock(port Port) {
 					// pointer to the previous entry
 					srcWord = (addr - 4) & 0x1fffff
 				}
+			case PORT_GPU:
+				fmt.Println("dma: unhandled GPU read")
+				srcWord = 0
 			default:
 				panicFmt("inter: unhandled DMA source port %d", port)
 			}

@@ -48,6 +48,11 @@ func (op Instruction) Shift() uint32 {
 	return (uint32(op) >> 6) & 0x1f
 }
 
+// Coprocessor opcode in bits [25:21]
+func (op Instruction) CopOpcode() uint32 {
+	return (uint32(op) >> 21) & 0x1f
+}
+
 // Returns the instruction as a string. If it is invalid, it returns "ILLEGAL"
 func (op Instruction) String() string {
 	switch op.Function() {

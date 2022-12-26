@@ -20,13 +20,13 @@ var (
 	currentFrame  = ebiten.NewImage(width, height)
 	wg            sync.WaitGroup
 	prevFrameTime = time.Now()
-	deltaTime     float64
 	showFps       *bool
 	showCycles    *bool
 	cpu           *emulator.CPU
 	didPanic      bool
 	panicString   string
 	doRecover     *bool
+	frameDt       float64
 )
 
 type ebitenGame struct {
@@ -50,6 +50,17 @@ func (g *ebitenGame) Draw(screen *ebiten.Image) {
 	wg.Wait()
 	screen.DrawImage(currentFrame, op)
 
+	if *showFps {
+		ebitenutil.DebugPrintAt(screen, fmt.Sprintf("%f fps", 1/frameDt), 8, 8)
+	}
+	if *showCycles {
+		ebitenutil.DebugPrintAt(
+			screen,
+			fmt.Sprintf("%d cycles\npc: 0x%x", cpu.Th.Cycles, cpu.PC),
+			8, 24,
+		)
+	}
+
 	// draw error message if there was a panic
 	if didPanic {
 		ebitenutil.DebugPrintAt(screen, panicString, 8, 48)
@@ -65,7 +76,7 @@ func (g *ebitenGame) drawFrame() {
 	defer wg.Done()
 
 	// calculate delta time
-	deltaTime = time.Since(prevFrameTime).Seconds()
+	frameDt = time.Since(prevFrameTime).Seconds()
 
 	// create renderer if it's nil
 	if g.renderer == nil {
@@ -76,12 +87,6 @@ func (g *ebitenGame) drawFrame() {
 	// FIXME: for some reason, the image is flickering after the GPU timings were implemented
 	currentFrame.Clear()
 	g.renderer.Draw(currentFrame)
-	if *showFps {
-		ebitenutil.DebugPrintAt(currentFrame, fmt.Sprintf("%f fps", 1/deltaTime), 8, 8)
-	}
-	if *showCycles {
-		ebitenutil.DebugPrintAt(currentFrame, fmt.Sprintf("%d cycles", cpu.Th.Cycles), 8, 24)
-	}
 
 	prevFrameTime = time.Now()
 }

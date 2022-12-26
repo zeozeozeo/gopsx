@@ -37,6 +37,7 @@ type CPU struct {
 	// Instruction Cache (256 cache lines)
 	ICache [0x100]*ICacheLine
 	Th     *TimeHandler // Keeps track of the emulation time
+	Gte    *GTE         // Geometry Transformation Engine (coprocessor 2)
 }
 
 // Creates a new CPU state
@@ -52,6 +53,7 @@ func NewCPU(inter *Interconnect) *CPU {
 		Debugger: NewDebugger(),
 		Th:       NewTimeHandler(),
 		Cop0:     NewCop0(),
+		Gte:      inter.Gte,
 	}
 
 	// initialize registers to 0..32 (the values are not initialized on reset,
@@ -1117,14 +1119,29 @@ func (cpu *CPU) OpCOP1() {
 	cpu.Exception(EXCEPTION_COPROCESSOR_ERROR)
 }
 
+// Coprocessor 2 opcode (GTE)
+func (cpu *CPU) OpCOP2(instruction Instruction) {
+	switch instruction.CopOpcode() {
+	case 0b00110:
+		cpu.OpCTC2(instruction)
+	default:
+		panicFmt("cpu: unhandled GTE instruction 0x%x", instruction)
+	}
+}
+
 // Coprocessor 3 opcode (does not exist on the PlayStation)
 func (cpu *CPU) OpCOP3() {
 	cpu.Exception(EXCEPTION_COPROCESSOR_ERROR)
 }
 
-// Coprocessor 2 opcode (GTE)
-func (cpu *CPU) OpCOP2(instruction Instruction) {
-	panicFmt("cpu: unhandled GTE instruction 0x%x", instruction)
+// Move To Coprocessor 2 Control register
+func (cpu *CPU) OpCTC2(instruction Instruction) {
+	cpuR := instruction.T()
+	copR := instruction.D()
+
+	v := cpu.Reg(cpuR)
+
+	cpu.Gte.SetControl(copR, v)
 }
 
 // Load Word Left (little-endian only implementation)

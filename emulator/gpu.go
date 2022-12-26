@@ -195,14 +195,20 @@ func (gpu *GPU) GP0(val uint32) {
 			length, handler = 1, gpu.GP0Nop
 		case 0x01:
 			length, handler = 1, gpu.GP0ClearCache
+		case 0x02:
+			length, handler = 3, gpu.GP0FillRect
 		case 0x28:
 			length, handler = 5, gpu.GP0QuadMonoOpaque
 		case 0x2c:
 			length, handler = 9, gpu.GP0QuadTextureBlendOpaque
+		case 0x2d:
+			length, handler = 9, gpu.GP0QuadTextureRawOpaque
 		case 0x30:
 			length, handler = 6, gpu.GP0TriangleShadedOpaque
 		case 0x38:
 			length, handler = 8, gpu.GP0QuadShadedOpaque
+		case 0x65:
+			length, handler = 4, gpu.GP0RectTextureRawOpaque
 		case 0xa0:
 			length, handler = 3, gpu.GP0ImageLoad
 		case 0xc0:
@@ -242,6 +248,49 @@ func (gpu *GPU) GP0(val uint32) {
 	case GP0_MODE_IMAGE_LOAD:
 		gpu.GP0HandleImageLoad(val)
 	}
+}
+
+// GP0(0x02): Fill Rectangle
+func (gpu *GPU) GP0FillRect() {
+	// TODO: this should be affected by the mask
+	clr := ColorFromGP0(gpu.GP0Command.Get(0))
+	topLeft := Vec2FromGP0(gpu.GP0Command.Get(1))
+	size := Vec2FromGP0(gpu.GP0Command.Get(2))
+
+	gpu.DrawData.PushQuad(
+		NewVertex(topLeft, clr),
+		NewVertex(Vec2{topLeft.X + size.X, topLeft.Y}, clr),
+		NewVertex(Vec2{topLeft.X, topLeft.Y + size.Y}, clr),
+		NewVertex(Vec2{topLeft.X + size.X, topLeft.Y + size.Y}, clr),
+	)
+}
+
+// GP0(0x2D): Raw Textured Opaque Quadrilateral
+func (gpu *GPU) GP0QuadTextureRawOpaque() {
+	// FIXME: we don't support textures at this point, so the color is just red
+	clr := color.RGBA{255, 0, 0, 255}
+
+	gpu.DrawData.PushQuad(
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(1)), clr),
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(3)), clr),
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(5)), clr),
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(7)), clr),
+	)
+}
+
+// GP0(0x65): Opaque rectange with raw texture
+func (gpu *GPU) GP0RectTextureRawOpaque() {
+	// TODO: this should be affected by the mask
+	clr := ColorFromGP0(gpu.GP0Command.Get(0))
+	topLeft := Vec2FromGP0(gpu.GP0Command.Get(1))
+	size := Vec2FromGP0(gpu.GP0Command.Get(3))
+
+	gpu.DrawData.PushQuad(
+		NewVertex(topLeft, clr),
+		NewVertex(Vec2{topLeft.X + size.X, topLeft.Y}, clr),
+		NewVertex(Vec2{topLeft.X, topLeft.Y + size.Y}, clr),
+		NewVertex(Vec2{topLeft.X + size.X, topLeft.Y + size.Y}, clr),
+	)
 }
 
 // GP0(0xA0): Image Load
@@ -402,12 +451,6 @@ func (gpu *GPU) GP0DrawingOffset() {
 	// shift the value to 16 bits to force sign extension
 	gpu.DrawingXOffset = (int16(x << 5)) >> 5
 	gpu.DrawingYOffset = (int16(y << 5)) >> 5
-
-	// HACK: this should be in gpu.Sync(), but currently it causes
-	// the screen to flicker
-	if gpu.FrameEnd != nil {
-		gpu.FrameEnd()
-	}
 }
 
 // GP0(0xE2): Set Texture Window
@@ -742,15 +785,16 @@ func (gpu *GPU) Sync(th *TimeHandler, irqState *IrqState) {
 		irqState.SetHigh(INTERRUPT_VBLANK)
 	}
 
-	/* temporarily moved to GP0DrawingOffset
 	if gpu.VBlankInterrupt && !vblankInterrupt {
 		// end of vertical blanking, do the FrameEnd callback
-		// TODO: the FrameEnd() call here causes the screen to flicker
-		if gpu.FrameEnd != nil {
+
+		// FIXME: the FrameEnd() call here causes the screen to flicker
+		// HACK: as a workaround, I check if the draw data has any vertices.
+		//       I have no idea why this happens :(
+		if gpu.FrameEnd != nil && len(gpu.DrawData.VtxBuffer) > 0 {
 			gpu.FrameEnd()
 		}
 	}
-	*/
 
 	gpu.VBlankInterrupt = vblankInterrupt
 	gpu.PredictNextSync(th)
