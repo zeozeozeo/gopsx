@@ -28,7 +28,7 @@ var (
 	// The CD-ROM controller
 	CDROM_RANGE = NewRange(0x1f801800, 0x4)
 	// Controller and memory card range
-	CONTROLLER_MEMCARD_RANGE = NewRange(0x1f801040, 32)
+	PADMEMCARD_RANGE = NewRange(0x1f801040, 32)
 )
 
 type Range struct {

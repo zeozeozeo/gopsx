@@ -14,9 +14,32 @@
 
 # Status
 
-CPU, GPU, DMA, timers, CD-ROM and interrupts are partially implemented. The boot logo is being rendered correctly, but it doesn't have any textures yet
+CPU, GPU, DMA, timers, CD-ROM, controllers and interrupts are partially implemented. The boot logo is being rendered correctly, but it doesn't have any textures yet.
 
-![Boot animation](https://cdn.discordapp.com/attachments/783966433641365504/1056610589515993178/image.png)
+![Boot animation](https://cdn.discordapp.com/attachments/783966433641365504/1056857431906455622/image.png)
+
+# Other
+
+Default keyboard keymappings:
+
+|  Gamepad  |    Keyboard     |
+| :-------: | :-------------: |
+|   Start   |    Backspace    |
+|  Select   |   Right Shift   |
+|  DPadUp   |    Arrow Up     |
+| DPadRight |   Arrow Right   |
+| DPadDown  |   Arrow Down    |
+| DPadLeft  |   Arrow Left    |
+|    L2     |  Keypad Divide  |
+|    R2     | Keypad Multiply |
+|    L1     |    Keypad 7     |
+|    R1     |    Keypad 9     |
+| Triangle  |    Keypad 8     |
+|  Circle   |    Keypad 6     |
+|   Cross   |    Keypad 2     |
+|  Square   |    Keypad 4     |
+
+You can change them in the `main.go` file, but it would be great to be able to do that from the CLI
 
 # Thanks
 

@@ -134,11 +134,11 @@ func (cpu *CPU) FetchInstruction() Instruction {
 	pc := cpu.CurrentPC
 	cc := cpu.Inter.CacheCtrl
 
-	// KSEG1 is never cached
-	kseg1 := (pc & 0xe0000000) == 0xa0000000
+	// KSEG1 is not cached
+	cached := pc < 0xa0000000
 
-	if !kseg1 && cc.ICacheEnabled() {
-		tag := pc & 0xfffff000           // cache tag: bits [31:12]
+	if cached && cc.ICacheEnabled() {
+		tag := pc & 0x7ffff000           // cache tag: bits [31:12]
 		line := cpu.ICache[(pc>>4)&0xff] // cache line: bits [11:4]
 		index := (pc >> 2) & 3           // cache line index: bits [3:2]
 

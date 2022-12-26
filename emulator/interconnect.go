@@ -6,15 +6,16 @@ import (
 
 // Global interconnect. It stores all of the peripherals
 type Interconnect struct {
-	Bios      *BIOS        // Basic input/output memory
-	Ram       *RAM         // RAM
-	Dma       *DMA         // Direct Memory Access
-	Gpu       *GPU         // Graphics Processing Unit
-	CacheCtrl CacheControl // Cache Control register
-	IrqState  *IrqState    // Interrupt state
-	Timers    *Timers      // System timers
-	CdRom     *CdRom       // CD-ROM controller
-	Gte       *GTE         // Geometry Transformation Engine (coprocessor 2)
+	Bios       *BIOS        // Basic input/output memory
+	Ram        *RAM         // RAM
+	Dma        *DMA         // Direct Memory Access
+	Gpu        *GPU         // Graphics Processing Unit
+	CacheCtrl  CacheControl // Cache Control register
+	IrqState   *IrqState    // Interrupt state
+	Timers     *Timers      // System timers
+	CdRom      *CdRom       // CD-ROM controller
+	Gte        *GTE         // Geometry Transformation Engine (coprocessor 2)
+	PadMemCard *PadMemCard  // Gamepad and memory card
 }
 
 // Mask array used to strip the region bits of a CPU address. The mask
@@ -35,14 +36,15 @@ var REGION_MASK = [8]uint32{
 // Creates a new interconnect instance
 func NewInterconnect(bios *BIOS, ram *RAM, gpu *GPU) *Interconnect {
 	inter := &Interconnect{
-		Bios:     bios,
-		Ram:      ram,
-		Dma:      NewDMA(),
-		Gpu:      gpu,
-		IrqState: NewIrqState(),
-		Timers:   NewTimers(),
-		CdRom:    NewCdRom(),
-		Gte:      NewGTE(),
+		Bios:       bios,
+		Ram:        ram,
+		Dma:        NewDMA(),
+		Gpu:        gpu,
+		IrqState:   NewIrqState(),
+		Timers:     NewTimers(),
+		CdRom:      NewCdRom(),
+		Gte:        NewGTE(),
+		PadMemCard: NewPadMemCard(),
 	}
 	return inter
 }
@@ -51,7 +53,7 @@ func NewInterconnect(bios *BIOS, ram *RAM, gpu *GPU) *Interconnect {
 func (inter *Interconnect) Load(addr uint32, size AccessSize, th *TimeHandler) interface{} {
 	absAddr := MaskRegion(addr)
 
-	// averate RAM load delay
+	// average RAM load delay
 	th.Tick(5)
 
 	if ok, offset := RAM_RANGE.ContainsAndOffset(absAddr); ok {
@@ -92,9 +94,8 @@ func (inter *Interconnect) Load(addr uint32, size AccessSize, th *TimeHandler) i
 	if ok, offset := CDROM_RANGE.ContainsAndOffset(absAddr); ok {
 		return inter.CdRom.Load(size, offset)
 	}
-	if CONTROLLER_MEMCARD_RANGE.Contains(absAddr) {
-		// FIXME: we ignore this for now
-		return accessSizeU32(size, 0)
+	if ok, offset := PADMEMCARD_RANGE.ContainsAndOffset(absAddr); ok {
+		return inter.PadMemCard.Load(th, inter.IrqState, offset, size)
 	}
 
 	panicFmt("inter: unhandled load at address 0x%x", addr)
@@ -173,11 +174,8 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}, 
 		inter.CdRom.Store(offset, size, accessSizeToU8(size, val), inter.IrqState)
 		return
 	}
-	if CONTROLLER_MEMCARD_RANGE.Contains(absAddr) {
-		fmt.Printf(
-			"inter: unhandled write to controller/memcard 0x%x <- 0x%x\n",
-			absAddr, accessSizeToU32(size, val),
-		)
+	if ok, offset := PADMEMCARD_RANGE.ContainsAndOffset(absAddr); ok {
+		inter.PadMemCard.Store(offset, val, size, th, inter.IrqState)
 		return
 	}
 
@@ -442,6 +440,9 @@ func (inter *Interconnect) DoDmaLinkedList(port Port) {
 func (inter *Interconnect) Sync(th *TimeHandler) {
 	if th.NeedsSync(PERIPHERAL_GPU) {
 		inter.Gpu.Sync(th, inter.IrqState)
+	}
+	if th.NeedsSync(PERIPHERAL_PADMEMCARD) {
+		inter.PadMemCard.Sync(th, inter.IrqState)
 	}
 
 	inter.Timers.Sync(th, inter.IrqState)

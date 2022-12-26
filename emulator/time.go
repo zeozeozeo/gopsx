@@ -8,17 +8,18 @@ type TimeHandler struct {
 	// the CPU clock at 33.8685MHz (~29.525960700946ns)
 	Cycles     uint64
 	NextSync   uint64 // Next time a peripheral needs to be synchronized
-	TimeSheets []*TimeSheet
+	TimeSheets [5]*TimeSheet
 }
 
 // Represents a TimeSheet index
 type Peripheral uint32
 
 const (
-	PERIPHERAL_GPU    Peripheral = iota // Graphics Processing Unit
-	PERIPHERAL_TIMER0 Peripheral = iota // Timer 0
-	PERIPHERAL_TIMER1 Peripheral = iota // Timer 1
-	PERIPHERAL_TIMER2 Peripheral = iota // Timer 2
+	PERIPHERAL_GPU        Peripheral = iota // Graphics Processing Unit
+	PERIPHERAL_TIMER0     Peripheral = iota // Timer 0
+	PERIPHERAL_TIMER1     Peripheral = iota // Timer 1
+	PERIPHERAL_TIMER2     Peripheral = iota // Timer 2
+	PERIPHERAL_PADMEMCARD Peripheral = iota // Gamepad and memory card controller
 )
 
 // Returns a new instance of TimeHandler
@@ -26,8 +27,8 @@ func NewTimeHandler() *TimeHandler {
 	th := &TimeHandler{
 		NextSync: math.MaxUint64,
 	}
-	for i := 0; i < 4; i++ {
-		th.TimeSheets = append(th.TimeSheets, NewTimeSheet())
+	for i := 0; i < len(th.TimeSheets); i++ {
+		th.TimeSheets[i] = NewTimeSheet()
 	}
 	return th
 }

@@ -199,7 +199,7 @@ func (gpu *GPU) GP0(val uint32) {
 			length, handler = 3, gpu.GP0FillRect
 		case 0x28:
 			length, handler = 5, gpu.GP0QuadMonoOpaque
-		case 0x2c:
+		case 0x2c, 0x2f:
 			length, handler = 9, gpu.GP0QuadTextureBlendOpaque
 		case 0x2d:
 			length, handler = 9, gpu.GP0QuadTextureRawOpaque
@@ -334,7 +334,7 @@ func (gpu *GPU) GP0HandleImageLoad(word uint32) {
 		// load done, switch back to command mode
 		gpu.GP0Mode = GP0_MODE_COMMAND
 		// TODO: load image here
-		fmt.Println("gpu: unhandled image load")
+		// fmt.Println("gpu: unhandled image load")
 		gpu.LoadBuffer.Clear()
 	}
 }
