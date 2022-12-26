@@ -14,9 +14,11 @@
 
 # Status
 
-CPU, GPU, DMA, timers, CD-ROM, controllers and interrupts are partially implemented. The boot logo is being rendered correctly, but it doesn't have any textures yet.
+CPU, GPU, DMA, timers, CD-ROM, controllers and interrupts are partially implemented. The boot logo and the main menu are being rendered correctly, but it doesn't have any textures yet.
 
-![Boot animation](https://cdn.discordapp.com/attachments/783966433641365504/1056857431906455622/image.png)
+![Boot animation](https://cdn.discordapp.com/attachments/783966433641365504/1056906583193432094/image.png)
+
+![BIOS main menu](https://cdn.discordapp.com/attachments/783966433641365504/1056906529271455804/image.png)
 
 # Other
 

@@ -186,6 +186,7 @@ func (card *PadMemCard) HandleBusDsr(th *TimeHandler, delta uint64) {
 	delay := card.Bus.RemainingCycles
 	if delta < delay {
 		delay -= delta
+		card.Bus.State = BUS_STATE_DSR
 		card.Bus.RemainingCycles = delay
 	} else {
 		// DSR pulse is over
@@ -203,6 +204,7 @@ func (card *PadMemCard) HandleTransfer(th *TimeHandler, irqState *IrqState, delt
 	if delta < dur {
 		// continue transfer
 		dur -= delta
+		card.Bus.State = BUS_STATE_TRANSFER
 		card.Bus.TxDuration = dur
 
 		if card.DsrIt {
@@ -213,7 +215,7 @@ func (card *PadMemCard) HandleTransfer(th *TimeHandler, irqState *IrqState, delt
 	} else {
 		// end of transfer
 		if card.RxNotEmpty {
-			panic("gamepad: RX while FIFO is not empty")
+			fmt.Println("gamepad: RX while FIFO is not empty")
 		}
 
 		card.Response = resp
@@ -229,6 +231,7 @@ func (card *PadMemCard) HandleTransfer(th *TimeHandler, irqState *IrqState, delt
 			}
 
 			dsrDuration := 10
+			card.Bus.State = BUS_STATE_DSR
 			card.Bus.RemainingCycles = uint64(dsrDuration)
 		} else {
 			card.Bus.State = BUS_STATE_IDLE
