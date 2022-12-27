@@ -16,6 +16,8 @@ type Interconnect struct {
 	CdRom      *CdRom       // CD-ROM controller
 	Gte        *GTE         // Geometry Transformation Engine (coprocessor 2)
 	PadMemCard *PadMemCard  // Gamepad and memory card
+	MemControl [9]uint32    // Memory control registers
+	RamSize    uint32       // RAM_SIZE register
 }
 
 // Mask array used to strip the region bits of a CPU address. The mask
@@ -97,6 +99,13 @@ func (inter *Interconnect) Load(addr uint32, size AccessSize, th *TimeHandler) i
 	if ok, offset := PADMEMCARD_RANGE.ContainsAndOffset(absAddr); ok {
 		return inter.PadMemCard.Load(th, inter.IrqState, offset, size)
 	}
+	if ok, offset := MEMCONTROL_RANGE.ContainsAndOffset(absAddr); ok {
+		index := offset >> 2
+		return accessSizeU32(size, inter.MemControl[index])
+	}
+	if RAMSIZE_RANGE.Contains(absAddr) {
+		return accessSizeU32(size, inter.RamSize)
+	}
 
 	panicFmt("inter: unhandled load at address 0x%x", addr)
 	return accessSizeU32(size, 0)
@@ -124,6 +133,10 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}, 
 		default:
 			fmt.Printf("inter: unhandled write to MEM_CONTROL register 0x%x\n", addr)
 		}
+
+		index := offset >> 2
+		inter.MemControl[index] = valU32
+
 		return
 	}
 	if ok, offset := IRQ_CONTROL_RANGE.ContainsAndOffset(absAddr); ok {
@@ -163,7 +176,8 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}, 
 		return
 	}
 	if RAMSIZE_RANGE.Contains(absAddr) {
-		// ignore writes to this address
+		valU32 := accessSizeToU32(size, val)
+		inter.RamSize = valU32
 		return
 	}
 	if ok, offset := EXPANSION_2_RANGE.ContainsAndOffset(absAddr); ok {

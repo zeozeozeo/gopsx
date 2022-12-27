@@ -79,7 +79,8 @@ func (disc *Disc) IdentifyRegion() error {
 	switch license {
 	case "LicensedbySonyComputerEntertainmentInc": // Japan
 		disc.Region = REGION_JAPAN
-	case "LicensedbySonyComputerEntertainmentAmerica": // North America
+	case "LicensedbySonyComputerEntertainmentAmerica",
+		"LicensedbySonyComputerEntertainmentofAmerica": // North America
 		disc.Region = REGION_NORTH_AMERICA
 	case "LicensedbySonyComputerEntertainmentEurope": // Europe
 		disc.Region = REGION_EUROPE

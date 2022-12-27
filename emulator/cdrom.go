@@ -435,7 +435,7 @@ func (cdrom *CdRom) CommandSetMode() {
 
 func (cdrom *CdRom) CommandPause() {
 	if cdrom.ReadState.IsIdle() {
-		panic("cdrom: call to Pause when not reading")
+		fmt.Println("cdrom: call to Pause when not reading")
 	}
 
 	cdrom.OnAcknowledge = cdrom.AckPause
