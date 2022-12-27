@@ -23,14 +23,14 @@ func NewFIFOFromBytes(data []byte) *FIFO {
 // Returns true if the FIFO is empty
 func (fifo *FIFO) IsEmpty() bool {
 	// if the read and write pointers are the same, the FIFO is empty
-	return fifo.ReadPtr == fifo.WritePtr
+	return fifo.WritePtr == fifo.ReadPtr
 }
 
 // Returns true if the FIFO is full
 func (fifo *FIFO) IsFull() bool {
 	// if both pointers point to the same address, but have a different
 	// carry
-	return (fifo.ReadPtr^fifo.WritePtr^0x10)&0x1f == 0
+	return fifo.WritePtr == fifo.ReadPtr^0x10
 }
 
 // Resets the FIFO

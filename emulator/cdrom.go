@@ -252,7 +252,7 @@ func (cdrom *CdRom) Command(cmd uint8, irqState *IrqState, th *TimeHandler) {
 	}
 
 	cdrom.Response.Clear()
-	fmt.Printf("cdrom command 0x%x\n", cmd)
+	fmt.Printf("cdrom: cdrom command 0x%x\n", cmd)
 
 	var handler CmdHandlerFunc
 	switch cmd {
@@ -270,6 +270,8 @@ func (cdrom *CdRom) Command(cmd uint8, irqState *IrqState, th *TimeHandler) {
 		handler = cdrom.CommandSeekL
 	case 0x1a:
 		handler = cdrom.CommandGetId
+	case 0x1e:
+		handler = cdrom.CommandReadToc
 	case 0x19:
 		handler = cdrom.CommandTest
 	default:
