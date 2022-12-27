@@ -130,8 +130,6 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}, 
 			if valU32 != 0x1f802000 {
 				panicFmt("inter: bad expansion 2 base address 0x%x", addr)
 			}
-		default:
-			fmt.Printf("inter: unhandled write to MEM_CONTROL register 0x%x\n", addr)
 		}
 
 		index := offset >> 2
