@@ -2,6 +2,8 @@ package emulator
 
 import "fmt"
 
+const CPU_FREQ_HZ uint32 = 33_868_500
+
 // CPU state
 type CPU struct {
 	// The program counter register: points to the next instruction

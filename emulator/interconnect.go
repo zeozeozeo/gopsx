@@ -33,8 +33,8 @@ var REGION_MASK = [8]uint32{
 	0xffffffff, 0xffffffff,
 }
 
-// Creates a new interconnect instance
-func NewInterconnect(bios *BIOS, ram *RAM, gpu *GPU) *Interconnect {
+// Creates a new interconnect instance. Disc can be nil
+func NewInterconnect(bios *BIOS, ram *RAM, gpu *GPU, disc *Disc) *Interconnect {
 	inter := &Interconnect{
 		Bios:       bios,
 		Ram:        ram,
@@ -42,7 +42,7 @@ func NewInterconnect(bios *BIOS, ram *RAM, gpu *GPU) *Interconnect {
 		Gpu:        gpu,
 		IrqState:   NewIrqState(),
 		Timers:     NewTimers(),
-		CdRom:      NewCdRom(),
+		CdRom:      NewCdRom(disc),
 		Gte:        NewGTE(),
 		PadMemCard: NewPadMemCard(),
 	}
@@ -92,7 +92,7 @@ func (inter *Interconnect) Load(addr uint32, size AccessSize, th *TimeHandler) i
 		return accessSizeU32(size, 0)
 	}
 	if ok, offset := CDROM_RANGE.ContainsAndOffset(absAddr); ok {
-		return inter.CdRom.Load(size, offset)
+		return inter.CdRom.Load(th, inter.IrqState, size, offset)
 	}
 	if ok, offset := PADMEMCARD_RANGE.ContainsAndOffset(absAddr); ok {
 		return inter.PadMemCard.Load(th, inter.IrqState, offset, size)
@@ -171,7 +171,7 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}, 
 		return
 	}
 	if ok, offset := CDROM_RANGE.ContainsAndOffset(absAddr); ok {
-		inter.CdRom.Store(offset, size, accessSizeToU8(size, val), inter.IrqState)
+		inter.CdRom.Store(offset, size, accessSizeToU8(size, val), th, inter.IrqState)
 		return
 	}
 	if ok, offset := PADMEMCARD_RANGE.ContainsAndOffset(absAddr); ok {
@@ -374,8 +374,11 @@ func (inter *Interconnect) DoDmaBlock(port Port) {
 					srcWord = (addr - 4) & 0x1fffff
 				}
 			case PORT_GPU:
-				fmt.Println("dma: unhandled GPU read")
+				// FIXME
+				// fmt.Println("dma: unhandled GPU read")
 				srcWord = 0
+			case PORT_CDROM:
+				srcWord = inter.CdRom.DmaReadWord()
 			default:
 				panicFmt("inter: unhandled DMA source port %d", port)
 			}
@@ -444,7 +447,9 @@ func (inter *Interconnect) Sync(th *TimeHandler) {
 	if th.NeedsSync(PERIPHERAL_PADMEMCARD) {
 		inter.PadMemCard.Sync(th, inter.IrqState)
 	}
-
+	if th.NeedsSync(PERIPHERAL_CDROM) {
+		inter.CdRom.Sync(th, inter.IrqState)
+	}
 	inter.Timers.Sync(th, inter.IrqState)
 }
 

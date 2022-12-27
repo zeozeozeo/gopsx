@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"runtime/debug"
 	"sync"
@@ -28,6 +27,7 @@ var (
 	panicString   string
 	doRecover     *bool
 	frameDt       float64
+	disc          *emulator.Disc
 )
 
 // Gamepad button can be binded to multiple keys
@@ -259,7 +259,22 @@ func main() {
 	showFps = flag.Bool("fps", true, "show FPS value")
 	showCycles = flag.Bool("cycles", true, "show amount of CPU cycles")
 	doRecover = flag.Bool("recover", true, "recover from emulator panics")
+	discPath := flag.String("disc", "", "disc .BIN path")
 	flag.Parse()
+
+	if *discPath != "" {
+		// try to load disc
+		file, err := os.Open(*discPath)
+		if err != nil {
+			panic(err)
+		}
+		defer file.Close()
+		disc, err = emulator.NewDisc(file)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Printf("main: disc region: %s\n", disc.RegionString())
+	}
 
 	g := &ebitenGame{}
 	go startEmulator(g, *biosPath)
@@ -270,9 +285,15 @@ func startEmulator(g *ebitenGame, biosPath string) {
 	// start emulator
 	bios := loadBios(biosPath)
 	ram := emulator.NewRAM()
-	gpu = emulator.NewGPU(emulator.HARDWARE_NTSC)
+
+	hardware := emulator.HARDWARE_NTSC
+	if disc != nil {
+		hardware = emulator.GetHardwareFromRegion(disc.Region)
+	}
+	gpu = emulator.NewGPU(hardware)
+
 	gpu.SetFrameEnd(g.drawFrame)
-	inter := emulator.NewInterconnect(bios, ram, gpu)
+	inter := emulator.NewInterconnect(bios, ram, gpu, disc)
 	cpu = emulator.NewCPU(inter)
 
 	defer func() {
@@ -291,7 +312,7 @@ func startEmulator(g *ebitenGame, biosPath string) {
 }
 
 func loadBios(path string) *emulator.BIOS {
-	log.Printf("loading bios \"%s\"", path)
+	fmt.Printf("main: loading bios \"%s\"\n", path)
 	start := time.Now()
 
 	// read bios
@@ -307,6 +328,6 @@ func loadBios(path string) *emulator.BIOS {
 		panic(err)
 	}
 
-	log.Printf("loaded bios in %s", time.Since(start))
+	fmt.Printf("main: loaded bios in %s\n", time.Since(start))
 	return bios
 }

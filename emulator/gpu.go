@@ -710,13 +710,13 @@ func (gpu *GPU) SetFrameEnd(end func()) {
 // Convert GPU clock ratio to CPU clock ratio
 func (gpu *GPU) GPUToCPUClockRatio() FracCycles {
 	// convert delta into GPU clock periods
-	var cpuClock float32 = 33.8685
 	var gpuClock float32
+	cpuClock := float32(CPU_FREQ_HZ)
 	switch gpu.Hardware {
 	case HARDWARE_NTSC:
-		gpuClock = 53.69
+		gpuClock = 53_690_000
 	case HARDWARE_PAL:
-		gpuClock = 53.20
+		gpuClock = 53_200_000
 	}
 
 	return FracCyclesFromF32(gpuClock / cpuClock)

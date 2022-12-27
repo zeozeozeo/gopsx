@@ -61,6 +61,6 @@ func (gte *GTE) SetControl(reg, val uint32) {
 	case 30:
 		gte.Zsf4 = int16(val)
 	default:
-		panicFmt("gte: unhandled control register %d", reg)
+		panicFmt("gte: unhandled control register %d <- 0x%x", reg, val)
 	}
 }

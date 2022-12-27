@@ -12,10 +12,18 @@ func NewFIFO() *FIFO {
 	return &FIFO{}
 }
 
+func NewFIFOFromBytes(data []byte) *FIFO {
+	fifo := NewFIFO()
+	for _, v := range data {
+		fifo.Push(v)
+	}
+	return fifo
+}
+
 // Returns true if the FIFO is empty
 func (fifo *FIFO) IsEmpty() bool {
 	// if the read and write pointers are the same, the FIFO is empty
-	return (fifo.WritePtr^fifo.ReadPtr)&0x1f == 0
+	return fifo.ReadPtr == fifo.WritePtr
 }
 
 // Returns true if the FIFO is full
@@ -27,7 +35,8 @@ func (fifo *FIFO) IsFull() bool {
 
 // Resets the FIFO
 func (fifo *FIFO) Clear() {
-	fifo.ReadPtr = fifo.WritePtr
+	fifo.ReadPtr = 0
+	fifo.WritePtr = 0
 	for i := 0; i < len(fifo.Buffer); i++ {
 		fifo.Buffer[i] = 0
 	}
@@ -36,14 +45,14 @@ func (fifo *FIFO) Clear() {
 // Pushes a value to the FIFO
 func (fifo *FIFO) Push(val uint8) {
 	fifo.Buffer[fifo.WritePtr&0xf] = val
-	fifo.WritePtr++
+	fifo.WritePtr = (fifo.WritePtr + 1) & 0x1f
 }
 
 // Increments the read pointer of the FIFO and returns the value at
 // that pointer
 func (fifo *FIFO) Pop() uint8 {
 	idx := fifo.ReadPtr & 0xf
-	fifo.ReadPtr++
+	fifo.ReadPtr = (fifo.ReadPtr + 1) & 0x1f
 	return fifo.Buffer[idx]
 }
 

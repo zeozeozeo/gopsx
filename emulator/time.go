@@ -8,7 +8,7 @@ type TimeHandler struct {
 	// the CPU clock at 33.8685MHz (~29.525960700946ns)
 	Cycles     uint64
 	NextSync   uint64 // Next time a peripheral needs to be synchronized
-	TimeSheets [5]*TimeSheet
+	TimeSheets [6]*TimeSheet
 }
 
 // Represents a TimeSheet index
@@ -20,6 +20,7 @@ const (
 	PERIPHERAL_TIMER1     Peripheral = iota // Timer 1
 	PERIPHERAL_TIMER2     Peripheral = iota // Timer 2
 	PERIPHERAL_PADMEMCARD Peripheral = iota // Gamepad and memory card controller
+	PERIPHERAL_CDROM      Peripheral = iota // CD-ROM controller
 )
 
 // Returns a new instance of TimeHandler
@@ -49,6 +50,16 @@ func (th *TimeHandler) SetNextSyncDelta(from Peripheral, delta uint64) {
 
 	if at < th.NextSync {
 		th.NextSync = at
+	}
+}
+
+func (th *TimeHandler) SetNextSyncDeltaIfCloser(from Peripheral, delta uint64) {
+	at := th.Cycles + delta
+	timesheet := th.TimeSheets[from]
+	nextSync := timesheet.NextSync
+
+	if nextSync > at {
+		timesheet.NextSync = at
 	}
 }
 
