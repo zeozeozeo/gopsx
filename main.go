@@ -52,7 +52,6 @@ type ebitenGame struct {
 	renderer       *emulator.EbitenRenderer
 	gamepadIDs     map[ebiten.GamepadID]struct{}
 	axes           map[ebiten.GamepadID][]float64
-	pressedButtons map[ebiten.GamepadID][]int
 }
 
 func (g *ebitenGame) Update() error {
@@ -61,7 +60,6 @@ func (g *ebitenGame) Update() error {
 	}
 	pad := cpu.Inter.PadMemCard.Pad1
 	g.handleConnectedGamepads()
-	g.captureGamepadInput()
 	g.handleGamepadInput(pad)
 	handleKeyboard(pad)
 
@@ -86,9 +84,6 @@ func (g *ebitenGame) handleConnectedGamepads() {
 	if g.gamepadIDs == nil {
 		g.gamepadIDs = map[ebiten.GamepadID]struct{}{}
 	}
-	if g.pressedButtons == nil {
-		g.pressedButtons = map[ebiten.GamepadID][]int{}
-	}
 
 	gamepadsConnected := inpututil.AppendJustConnectedGamepadIDs(nil)
 	for _, id := range gamepadsConnected {
@@ -104,7 +99,7 @@ func (g *ebitenGame) handleConnectedGamepads() {
 	}
 }
 
-func (g *ebitenGame) captureGamepadInput() {
+func (g *ebitenGame) handleGamepadInput(pad *emulator.Gamepad) {
 	g.axes = map[ebiten.GamepadID][]float64{}
 
 	for id := range g.gamepadIDs {
@@ -117,75 +112,51 @@ func (g *ebitenGame) captureGamepadInput() {
 		maxButton := ebiten.GamepadButton(ebiten.GamepadButtonCount(id))
 
 		for b := ebiten.GamepadButton(id); b < maxButton; b++ {
-			if ebiten.IsGamepadButtonPressed(id, b) {
-				g.pressedButtons[id] = append(g.pressedButtons[id], int(b))
-			}
-
 			// log button events
 			if inpututil.IsGamepadButtonJustPressed(id, b) {
 				fmt.Printf("main: button pressed: id: %d, button: %d\n", id, b)
+				pad.SetButtonState(buttonFromId(int(b)), emulator.BUTTON_STATE_PRESSED)
 			}
 			if inpututil.IsGamepadButtonJustReleased(id, b) {
 				fmt.Printf("main: button released: id: %d, button: %d\n", id, b)
+				pad.SetButtonState(buttonFromId(int(b)), emulator.BUTTON_STATE_RELEASED)
 			}
 		}
 	}
 }
 
-func (g *ebitenGame) handleGamepadInput(pad *emulator.Gamepad) {
-	var padButton emulator.Button
-	var state emulator.ButtonState
-
-	for id := range g.gamepadIDs {
-		buttons := g.pressedButtons[id]
-		if len(buttons) == 0 {
-			return
-		}
-		button := buttons[0]
-
-		// HACK: I have no idea if Ebiten exposes any button name
-		// constants, so I just tested them myself
-		// TODO: make this configurable
-		switch button {
-		case 0: // A -> Cross
-			padButton = emulator.BUTTON_CROSS
-		case 1: // B -> Circle
-			padButton = emulator.BUTTON_CIRCLE
-		case 3: // X -> Square
-			padButton = emulator.BUTTON_SQUARE
-		case 4: // Y -> Triangle
-			padButton = emulator.BUTTON_TRIANGLE
-		case 15: // DPadUp
-			padButton = emulator.BUTTON_DUP
-		case 17: // DPadDown
-			padButton = emulator.BUTTON_DDOWN
-		case 18: // DPadLeft
-			padButton = emulator.BUTTON_DLEFT
-		case 16: // DPadRight
-			padButton = emulator.BUTTON_DRIGHT
-		case 11: // Start
-			padButton = emulator.BUTTON_START
-		case 12: // Back -> Select
-			padButton = emulator.BUTTON_SELECT
-		case 6: // LeftShoulder
-			padButton = emulator.BUTTON_L1
-		case 7: // RightShoulder
-			padButton = emulator.BUTTON_R1
-		case 8:
-			padButton = emulator.BUTTON_R2
-		case 9:
-			padButton = emulator.BUTTON_L2
-		}
-
-		inputButton := ebiten.GamepadButton(button)
-		if inpututil.IsGamepadButtonJustPressed(id, inputButton) {
-			state = emulator.BUTTON_STATE_PRESSED
-		} else if inpututil.IsGamepadButtonJustReleased(id, inputButton) {
-			state = emulator.BUTTON_STATE_RELEASED
-		}
+func buttonFromId(id int) emulator.Button {
+	switch id {
+	case 0: // A -> Cross
+		return emulator.BUTTON_CROSS
+	case 1: // B -> Circle
+		return emulator.BUTTON_CIRCLE
+	case 3: // X -> Square
+		return emulator.BUTTON_SQUARE
+	case 4: // Y -> Triangle
+		return emulator.BUTTON_TRIANGLE
+	case 15: // DPadUp
+		return emulator.BUTTON_DUP
+	case 17: // DPadDown
+		return emulator.BUTTON_DDOWN
+	case 18: // DPadLeft
+		return emulator.BUTTON_DLEFT
+	case 16: // DPadRight
+		return emulator.BUTTON_DRIGHT
+	case 11: // Start
+		return emulator.BUTTON_START
+	case 12: // Back -> Select
+		return emulator.BUTTON_SELECT
+	case 6: // LeftShoulder
+		return emulator.BUTTON_L1
+	case 7: // RightShoulder
+		return emulator.BUTTON_R1
+	case 8:
+		return emulator.BUTTON_R2
+	case 9:
+		return emulator.BUTTON_L2
 	}
-
-	pad.SetButtonState(padButton, state)
+	return 0
 }
 
 func (g *ebitenGame) Draw(screen *ebiten.Image) {
