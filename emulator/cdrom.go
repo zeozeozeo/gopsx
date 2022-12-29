@@ -7,7 +7,7 @@ type IrqCode uint8
 
 const (
 	IRQ_CODE_SECTOR_READY IrqCode = 1 // CD sector is ready
-	IRQ_CODE_DONE         IrqCode = 1 // Command successful (2nd response)
+	IRQ_CODE_DONE         IrqCode = 2 // Command successful (2nd response)
 	IRQ_CODE_OK           IrqCode = 3 // Command successful (1st response)
 	IRQ_CODE_ERROR        IrqCode = 5 // Invalid command, etc.
 )
@@ -103,6 +103,41 @@ func NewCdRom(disc *Disc) *CdRom {
 	return cdrom
 }
 
+func (cdrom *CdRom) RxPending(delay, irqDelay uint32, code IrqCode, response *FIFO) {
+	state := cdrom.CmdState
+	state.State = CMD_STATE_RXPENDING
+	state.RxPendingDelay = delay
+	state.RxPendingIrqDelay = irqDelay
+	state.RxPendingIrqCode = code
+	state.RxPendingFifo = response
+	// reset value of irqpending
+	state.IrqPendingIrqDelay = 0
+	state.IrqPendingIrqCode = 0
+}
+
+func (cdrom *CdRom) IrqPending(delay uint32, code IrqCode) {
+	state := cdrom.CmdState
+	state.State = CMD_STATE_IRQ_PENDING
+	state.IrqPendingIrqDelay = delay
+	state.IrqPendingIrqCode = code
+	// reset value of rxpending
+	state.RxPendingDelay = 0
+	state.RxPendingIrqDelay = 0
+	state.RxPendingIrqCode = 0
+	state.RxPendingFifo = nil
+}
+
+func (cdrom *CdRom) IdleState() {
+	state := cdrom.CmdState
+	state.State = CMD_STATE_IDLE
+	state.IrqPendingIrqDelay = 0
+	state.IrqPendingIrqCode = 0
+	state.RxPendingDelay = 0
+	state.RxPendingIrqDelay = 0
+	state.RxPendingIrqCode = 0
+	state.RxPendingFifo = nil
+}
+
 func (cdrom *CdRom) Status() uint8 {
 	r := cdrom.Index
 
@@ -177,7 +212,7 @@ func (cdrom *CdRom) CommandGetStat() {
 		rxDelay = 17000 // average delay with tray open
 	}
 
-	cdrom.PushRxCommand(rxDelay, rxDelay+5401, IRQ_CODE_OK, response)
+	cdrom.RxPending(rxDelay, rxDelay+5401, IRQ_CODE_OK, response)
 }
 
 func (cdrom *CdRom) DriveStatus() uint8 {
@@ -226,7 +261,7 @@ func (cdrom *CdRom) TestVersion() {
 		rxDelay = 29000
 	}
 
-	cdrom.PushRxCommand(rxDelay, rxDelay+9711, IRQ_CODE_OK, response)
+	cdrom.RxPending(rxDelay, rxDelay+9711, IRQ_CODE_OK, response)
 }
 
 func (cdrom *CdRom) PushParam(param uint8) {
@@ -292,7 +327,7 @@ func (cdrom *CdRom) Command(cmd uint8, irqState *IrqState, th *TimeHandler) {
 func (cdrom *CdRom) CommandReadToc() {
 	cdrom.OnAcknowledge = cdrom.AckReadToc
 
-	cdrom.PushRxCommand(
+	cdrom.RxPending(
 		45000,
 		45000+5401,
 		IRQ_CODE_OK,
@@ -308,21 +343,12 @@ func (cdrom *CdRom) AckReadToc() {
 		rxDelay = 11000
 	}
 
-	cdrom.PushRxCommand(
+	cdrom.RxPending(
 		rxDelay,
 		rxDelay+1859,
 		IRQ_CODE_DONE,
 		NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
 	)
-}
-
-func (cdrom *CdRom) PushRxCommand(delay, irqDelay uint32, code IrqCode, response *FIFO) {
-	state := cdrom.CmdState
-	state.State = CMD_STATE_RXPENDING
-	state.RxPendingDelay = delay
-	state.RxPendingIrqDelay = irqDelay
-	state.RxPendingIrqCode = code
-	state.RxPendingFifo = response
 }
 
 // Read the CD-ROM's identification string
@@ -332,7 +358,7 @@ func (cdrom *CdRom) CommandGetId() {
 		cdrom.OnAcknowledge = cdrom.AckGetId
 
 		// send status byte
-		cdrom.PushRxCommand(
+		cdrom.RxPending(
 			26000,
 			26000+5401,
 			IRQ_CODE_OK,
@@ -340,7 +366,7 @@ func (cdrom *CdRom) CommandGetId() {
 		)
 	} else {
 		// pretend that the disc tray is open
-		cdrom.PushRxCommand(
+		cdrom.RxPending(
 			20000,
 			20000+6776,
 			IRQ_CODE_ERROR,
@@ -370,7 +396,7 @@ func (cdrom *CdRom) AckGetId() {
 		'S', 'C', 'E', regionByte, // region string
 	})
 
-	cdrom.PushRxCommand(7336, 7336+12376, IRQ_CODE_DONE, response)
+	cdrom.RxPending(7336, 7336+12376, IRQ_CODE_DONE, response)
 }
 
 // Execute seek command
@@ -383,7 +409,7 @@ func (cdrom *CdRom) CommandSeekL() {
 	cdrom.Position = cdrom.SeekTarget
 	cdrom.OnAcknowledge = cdrom.AckSeekL
 
-	cdrom.PushRxCommand(
+	cdrom.RxPending(
 		35000,
 		35000+5401,
 		IRQ_CODE_OK,
@@ -395,7 +421,7 @@ func (cdrom *CdRom) AckSeekL() {
 	// FIXME: we should measure how much time it would take
 	//        for the drive to physically move the head
 
-	cdrom.PushRxCommand(
+	cdrom.RxPending(
 		1000000,
 		1000000+1859,
 		IRQ_CODE_DONE,
@@ -420,7 +446,7 @@ func (cdrom *CdRom) CommandSetMode() {
 		panicFmt("cdrom: unhandled mode 0x%x", mode)
 	}
 
-	cdrom.PushRxCommand(
+	cdrom.RxPending(
 		22000,
 		22000+5391,
 		IRQ_CODE_OK,
@@ -435,7 +461,7 @@ func (cdrom *CdRom) CommandPause() {
 
 	cdrom.OnAcknowledge = cdrom.AckPause
 
-	cdrom.PushRxCommand(
+	cdrom.RxPending(
 		25000,
 		25000+5393,
 		IRQ_CODE_OK,
@@ -445,8 +471,9 @@ func (cdrom *CdRom) CommandPause() {
 
 func (cdrom *CdRom) AckPause() {
 	cdrom.ReadState.State = READ_STATE_IDLE
+	cdrom.ReadState.Delay = 0
 
-	cdrom.PushRxCommand(
+	cdrom.RxPending(
 		2000000,
 		2000000+1858,
 		IRQ_CODE_DONE,
@@ -464,7 +491,7 @@ func (cdrom *CdRom) CommandReadN() {
 	cdrom.ReadState.State = READ_STATE_READING
 	cdrom.ReadState.Delay = readDelay
 
-	cdrom.PushRxCommand(
+	cdrom.RxPending(
 		28000,
 		28000+5401,
 		IRQ_CODE_OK,
@@ -488,17 +515,15 @@ func (cdrom *CdRom) CommandSetLoc() {
 	f := cdrom.Params.Pop()
 	cdrom.SeekTarget = MsfFromBcd(m, s, f)
 
-	state := cdrom.CmdState
-	state.State = CMD_STATE_RXPENDING
 	if cdrom.Disc != nil {
-		cdrom.PushRxCommand(
+		cdrom.RxPending(
 			35000,
 			35000+5399,
 			IRQ_CODE_OK,
 			NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
 		)
 	} else {
-		cdrom.PushRxCommand(
+		cdrom.RxPending(
 			25000,
 			25000+6763,
 			IRQ_CODE_ERROR,
@@ -642,14 +667,12 @@ func (cdrom *CdRom) HandleIrqPendingState(th *TimeHandler, irqState *IrqState, d
 		newIrqDelay := irqDelay - uint32(delta)
 
 		th.SetNextSyncDelta(PERIPHERAL_CDROM, uint64(irqDelay))
-		state.State = CMD_STATE_IRQ_PENDING
-		state.IrqPendingIrqDelay = newIrqDelay
-		state.IrqPendingIrqCode = irqCode
+		cdrom.IrqPending(newIrqDelay, irqCode)
 	} else {
 		// reached interrupt
 		cdrom.TriggerIrq(irqCode, irqState)
 		th.RemoveNextSync(PERIPHERAL_CDROM)
-		state.State = CMD_STATE_IDLE
+		cdrom.IdleState()
 	}
 }
 
@@ -666,7 +689,7 @@ func (cdrom *CdRom) HandleRxPendingState(th *TimeHandler, irqState *IrqState, de
 		irqDelay -= uint32(delta)
 
 		th.SetNextSyncDelta(PERIPHERAL_CDROM, uint64(rxDelay))
-		cdrom.PushRxCommand(rxDelay, irqDelay, irqCode, response)
+		cdrom.RxPending(rxDelay, irqDelay, irqCode, response)
 	} else {
 		// end of transfer
 		cdrom.Response = response
@@ -675,22 +698,19 @@ func (cdrom *CdRom) HandleRxPendingState(th *TimeHandler, irqState *IrqState, de
 			// schedule an interrupt
 			newIrqDelay := irqDelay - uint32(delta)
 			th.SetNextSyncDelta(PERIPHERAL_CDROM, uint64(newIrqDelay))
-
-			state.State = CMD_STATE_IRQ_PENDING
-			state.IrqPendingIrqDelay = newIrqDelay
-			state.IrqPendingIrqCode = irqCode
+			cdrom.IrqPending(newIrqDelay, irqCode)
 		} else {
 			// irq reached
 			cdrom.TriggerIrq(irqCode, irqState)
 			th.RemoveNextSync(PERIPHERAL_CDROM)
-			state.State = CMD_STATE_IDLE
+			cdrom.IdleState()
 		}
 	}
 }
 
 func (cdrom *CdRom) HandleIdleState(th *TimeHandler) {
 	th.RemoveNextSync(PERIPHERAL_CDROM)
-	cdrom.CmdState.State = CMD_STATE_IDLE
+	cdrom.IdleState()
 }
 
 // Read a byte from the RX buffer
@@ -767,5 +787,5 @@ func (cdrom *CdRom) Config(conf uint8) {
 }
 
 func (cdrom *CdRom) AckIdle() {
-	cdrom.CmdState.State = CMD_STATE_IDLE
+	cdrom.IdleState()
 }
