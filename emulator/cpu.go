@@ -1123,11 +1123,18 @@ func (cpu *CPU) OpCOP1() {
 
 // Coprocessor 2 opcode (GTE)
 func (cpu *CPU) OpCOP2(instruction Instruction) {
-	switch instruction.CopOpcode() {
-	case 0b00110:
-		cpu.OpCTC2(instruction)
-	default:
-		panicFmt("cpu: unhandled GTE instruction 0x%x", instruction)
+	copOpcode := instruction.CopOpcode()
+
+	if copOpcode&0x10 != 0 {
+		// GTE command
+		cpu.Gte.Command(uint32(instruction))
+	} else {
+		switch instruction.CopOpcode() {
+		case 0b00110:
+			cpu.OpCTC2(instruction)
+		default:
+			panicFmt("cpu: unhandled GTE instruction 0x%x", instruction)
+		}
 	}
 }
 
@@ -1294,7 +1301,17 @@ func (cpu *CPU) OpLWC1() {
 
 // Load Word in Coprocessor 2
 func (cpu *CPU) OpLWC2(instruction Instruction) {
-	panicFmt("unhandled GTE LWC %d", instruction)
+	i := instruction.ImmSE()
+	copR := instruction.T()
+	s := instruction.S()
+	addr := cpu.Reg(s) + i
+
+	if addr%4 == 0 {
+		val := cpu.Load32(addr)
+		cpu.Gte.SetData(copR, val)
+	} else {
+		cpu.Exception(EXCEPTION_LOAD_ADDRESS_ERROR)
+	}
 }
 
 // Load Word in Coprocessor 3 (not supported)
