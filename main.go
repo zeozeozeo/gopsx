@@ -49,9 +49,9 @@ var keyboardGamepadBindings = map[emulator.Button][]ebiten.Key{
 }
 
 type ebitenGame struct {
-	renderer       *emulator.EbitenRenderer
-	gamepadIDs     map[ebiten.GamepadID]struct{}
-	axes           map[ebiten.GamepadID][]float64
+	renderer   *emulator.EbitenRenderer
+	gamepadIDs map[ebiten.GamepadID]struct{}
+	axes       map[ebiten.GamepadID][]float64
 }
 
 func (g *ebitenGame) Update() error {
@@ -77,6 +77,10 @@ func handleKeyboard(pad *emulator.Gamepad) {
 			}
 			break
 		}
+	}
+
+	if ebiten.IsKeyPressed(ebiten.KeyEscape) {
+		os.Exit(0)
 	}
 }
 
