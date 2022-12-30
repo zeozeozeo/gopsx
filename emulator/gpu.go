@@ -281,7 +281,7 @@ func (gpu *GPU) GP0QuadTextureRawOpaque() {
 	)
 }
 
-// GP0(0x65): Opaque rectange with raw texture
+// GP0(0x65): Opaque rectangle with raw texture
 func (gpu *GPU) GP0RectTextureRawOpaque() {
 	// TODO: this should be affected by the mask
 	clr := ColorFromGP0(gpu.GP0Command.Get(0))

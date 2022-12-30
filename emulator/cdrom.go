@@ -278,7 +278,7 @@ func (cdrom *CdRom) PushParam(param uint8) {
 
 func (cdrom *CdRom) Command(cmd uint8, irqState *IrqState, th *TimeHandler) {
 	if !cdrom.CmdState.IsIdle() {
-		panic("cdrom: recieved command while controller is busy")
+		panic("cdrom: received command while controller is busy")
 	}
 
 	cdrom.Response.Clear()
