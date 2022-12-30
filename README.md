@@ -1,24 +1,34 @@
 # gopsx, a PlayStation 1 emulator written in Go
 
-# Setup
+# Usage
 
-1. Get a PlayStation 1 BIOS. I ended up using `SCPH1001.BIN`. The file should be exactly 512KB big. Checksums of `SCPH1001.BIN`:
-
-    | MD5                                | SHA-1                                      |
-    | ---------------------------------- | ------------------------------------------ |
-    | `924e392ed05558ffdb115408c263dccf` | `10155d8d6e6e832d6ea66db9bc098321fb5e8ebf` |
-
-    It should be fairly easy to find it on the web.
-
-2. To boot the BIOS, run `<command> -bios "BIOS_PATH_HERE"`. The default BIOS path is `SCPH1001.BIN`, but i'll probably remove that sometime.
+1. Get a PlayStation 1 BIOS.
+2. To boot the BIOS, run `<command> -bios "BIOS_PATH_HERE"`. The default BIOS path is `SCPH1001.BIN` for now.
+3. To insert a disc, specify it's path with `<command> -disc "DISC_PATH_HERE"`. It should be a `.bin` file (`.cue` files are not supported yet)
+4. You can see other arguments by running `<command> -h`
 
 # Status
 
-CPU, GPU, DMA, timers, CD-ROM, controllers and interrupts are partially implemented. The boot logo and the main menu are being rendered correctly, but it doesn't have any textures yet.
+Implemented:
 
-![Boot animation](https://cdn.discordapp.com/attachments/783966433641365504/1056906583193432094/image.png)
+-   CPU
+-   DMA
+-   Timers
+-   Basic CD-ROM implementation
+-   Gamepad (still needs testing)
+-   Interrupts
+-   GPU (not much)
+-   GTE (very simple implementation, doesn't seem to work at this moment)
 
-![BIOS main menu](https://cdn.discordapp.com/attachments/783966433641365504/1056906529271455804/image.png)
+## Images
+
+You can click on an image to see how it should look like
+
+[![Boot animation](https://cdn.discordapp.com/attachments/783966433641365504/1056906583193432094/image.png)](https://cdn.discordapp.com/attachments/783966433641365504/1058378226222760027/image.png)
+
+[![BIOS main menu](https://cdn.discordapp.com/attachments/783966433641365504/1056906529271455804/image.png)](https://cdn.discordapp.com/attachments/783966433641365504/1058378809574948924/image.png)
+
+[![BIOS logo](https://cdn.discordapp.com/attachments/783966433641365504/1058376979772100638/image.png)](https://cdn.discordapp.com/attachments/783966433641365504/1058378941158666371/image.png)
 
 # Other
 
