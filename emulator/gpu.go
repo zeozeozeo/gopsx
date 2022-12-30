@@ -185,7 +185,8 @@ func NewGPU(hardware HardwareType) *GPU {
 func (gpu *GPU) GP0(val uint32) {
 	if gpu.GP0WordsRemaining == 0 {
 		// start a new GP0 command
-		opcode := (val >> 24) & 0xff
+		// opcode := (val >> 24) & 0xff
+		opcode := val >> 24
 
 		var length uint32
 		var handler GP0CommandHandler
@@ -197,6 +198,8 @@ func (gpu *GPU) GP0(val uint32) {
 			length, handler = 1, gpu.GP0ClearCache
 		case 0x02:
 			length, handler = 3, gpu.GP0FillRect
+		case 0x20:
+			length, handler = 4, gpu.GP0TriangleMonoOpaque
 		case 0x28:
 			length, handler = 5, gpu.GP0QuadMonoOpaque
 		case 0x2c, 0x2f:
@@ -207,7 +210,7 @@ func (gpu *GPU) GP0(val uint32) {
 			length, handler = 6, gpu.GP0TriangleShadedOpaque
 		case 0x38:
 			length, handler = 8, gpu.GP0QuadShadedOpaque
-		case 0x65:
+		case 0x64, 0x65:
 			length, handler = 4, gpu.GP0RectTextureRawOpaque
 		case 0xa0:
 			length, handler = 3, gpu.GP0ImageLoad
@@ -376,6 +379,16 @@ func (gpu *GPU) GP0TriangleShadedOpaque() {
 		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(1)), ColorFromGP0(gpu.GP0Command.Get(0))),
 		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(3)), ColorFromGP0(gpu.GP0Command.Get(2))),
 		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(5)), ColorFromGP0(gpu.GP0Command.Get(4))),
+	)
+}
+
+// GP0(0x20): Monochrome Opaque Triangle
+func (gpu *GPU) GP0TriangleMonoOpaque() {
+	clr := ColorFromGP0(gpu.GP0Command.Get(0))
+	gpu.DrawData.PushVertices(
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(1)), clr),
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(2)), clr),
+		NewVertex(Vec2FromGP0(gpu.GP0Command.Get(3)), clr),
 	)
 }
 

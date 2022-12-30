@@ -1130,12 +1130,47 @@ func (cpu *CPU) OpCOP2(instruction Instruction) {
 		cpu.Gte.Command(uint32(instruction))
 	} else {
 		switch instruction.CopOpcode() {
+		case 0b00000:
+			cpu.OpMFC2(instruction)
+		case 0b00010:
+			cpu.OpCFC2(instruction)
+		case 0b00100:
+			cpu.OpMTC2(instruction)
 		case 0b00110:
 			cpu.OpCTC2(instruction)
 		default:
 			panicFmt("cpu: unhandled GTE instruction 0x%x", instruction)
 		}
 	}
+}
+
+// Move From Coprocessor 2 Data register
+func (cpu *CPU) OpMFC2(instruction Instruction) {
+	cpuR := instruction.T()
+	copR := instruction.D()
+
+	v := cpu.Gte.Data(copR)
+	cpu.Load[0] = cpuR
+	cpu.Load[1] = v
+}
+
+// Move From Coprocessor 2 Control register
+func (cpu *CPU) OpCFC2(instruction Instruction) {
+	cpuR := instruction.T()
+	copR := instruction.D()
+
+	v := cpu.Gte.Control(copR)
+	cpu.Load[0] = cpuR
+	cpu.Load[1] = v
+}
+
+// Move To Coprocessor 2 Data register
+func (cpu *CPU) OpMTC2(instruction Instruction) {
+	cpuR := instruction.T()
+	copR := instruction.D()
+
+	v := cpu.Reg(cpuR)
+	cpu.Gte.SetData(copR, v)
 }
 
 // Coprocessor 3 opcode (does not exist on the PlayStation)
@@ -1331,7 +1366,18 @@ func (cpu *CPU) OpSWC1() {
 
 // Store Word in Coprocessor 2
 func (cpu *CPU) OpSWC2(instruction Instruction) {
-	panicFmt("unhandled GTE SWC %d", instruction)
+	i := instruction.ImmSE()
+	copR := instruction.T()
+	s := instruction.S()
+
+	addr := cpu.Reg(s) + i
+	v := cpu.Gte.Data(copR)
+
+	if addr%4 == 0 {
+		cpu.Store32(addr, v)
+	} else {
+		cpu.Exception(EXCEPTION_LOAD_ADDRESS_ERROR)
+	}
 }
 
 // Store Word in Coprocessor 3 (not supported)
