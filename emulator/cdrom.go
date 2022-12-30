@@ -70,34 +70,39 @@ type CmdHandlerFunc func()
 
 // CD-ROM controller
 type CdRom struct {
-	Index         uint8          // Some registers can change depending on the index
-	Params        *FIFO          // FIFO storing the command arguments
-	Response      *FIFO          // FIFO storing command responses
-	IrqMask       uint8          // 5 bit interrupt mask
-	IrqFlags      uint8          // 5 bit interrupt flags
-	CmdState      *CommandState  // Command state
-	ReadState     *ReadState     // Read state
-	OnAcknowledge CmdHandlerFunc // Command handler
-	Disc          *Disc          // Currently loaded disc (can be nil)
-	SeekTarget    Msf            // Next seek command target
-	Position      Msf            // Read position
-	DoubleSpeed   bool           // If true, 150 sectors per second, else 75 sectors
-	RxSector      *XaSector      // RX buffer sector
-	RxActive      bool           // Whether the data RX buffer is active
-	RxIndex       uint16         // Index of the next RX sector byte
+	Index             uint8          // Some registers can change depending on the index
+	Params            *FIFO          // FIFO storing the command arguments
+	Response          *FIFO          // FIFO storing command responses
+	IrqMask           uint8          // 5 bit interrupt mask
+	IrqFlags          uint8          // 5 bit interrupt flags
+	CmdState          *CommandState  // Command state
+	ReadState         *ReadState     // Read state
+	OnAcknowledge     CmdHandlerFunc // Command handler
+	Disc              *Disc          // Currently loaded disc (can be nil)
+	SeekTarget        Msf            // Next seek command target
+	SeekTargetPending bool           // True if the seek is waiting to be executed
+	Position          Msf            // Read position
+	DoubleSpeed       bool           // If true, 150 sectors per second, else 75 sectors
+	RxSector          *XaSector      // RX buffer sector
+	RxActive          bool           // Whether the data RX buffer is active
+	RxIndex           uint16         // Index of the next RX sector byte
+	RxLen             uint16         // RX sector last byte index
+	RxOffset          uint16         // RX index offset
+	ReadWholeSector   bool           // Reads 0x924 bytes of the sector if true, 0x800 if false
 }
 
 // Disc can be nil
 func NewCdRom(disc *Disc) *CdRom {
 	cdrom := &CdRom{
-		Params:     NewFIFO(),
-		Response:   NewFIFO(),
-		CmdState:   NewCommandState(),
-		ReadState:  NewReadState(),
-		Disc:       disc,
-		SeekTarget: NewMsf(),
-		Position:   NewMsf(),
-		RxSector:   NewXaSector(),
+		Params:          NewFIFO(),
+		Response:        NewFIFO(),
+		CmdState:        NewCommandState(),
+		ReadState:       NewReadState(),
+		Disc:            disc,
+		SeekTarget:      NewMsf(),
+		Position:        NewMsf(),
+		RxSector:        NewXaSector(),
+		ReadWholeSector: true,
 	}
 	cdrom.OnAcknowledge = cdrom.AckIdle
 	return cdrom
@@ -289,6 +294,8 @@ func (cdrom *CdRom) Command(cmd uint8, irqState *IrqState, th *TimeHandler) {
 		handler = cdrom.CommandReadN
 	case 0x09:
 		handler = cdrom.CommandPause
+	case 0xa:
+		handler = cdrom.CommandInit
 	case 0x0e:
 		handler = cdrom.CommandSetMode
 	case 0x15:
@@ -323,6 +330,31 @@ func (cdrom *CdRom) Command(cmd uint8, irqState *IrqState, th *TimeHandler) {
 	cdrom.Params.Clear()
 }
 
+func (cdrom *CdRom) CommandInit() {
+	cdrom.OnAcknowledge = cdrom.AckInit
+	cdrom.RxPending(
+		58000,
+		58000+5401,
+		IRQ_CODE_OK,
+		NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
+	)
+}
+
+func (cdrom *CdRom) AckInit() {
+	cdrom.IdleState()
+	cdrom.DoubleSpeed = false
+	cdrom.ReadWholeSector = true
+	cdrom.Position = NewMsf()
+	cdrom.SeekTarget = NewMsf()
+
+	cdrom.RxPending(
+		2000000,
+		2000000+1870,
+		IRQ_CODE_DONE,
+		NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
+	)
+}
+
 // Read table of contents
 func (cdrom *CdRom) CommandReadToc() {
 	cdrom.OnAcknowledge = cdrom.AckReadToc
@@ -342,6 +374,9 @@ func (cdrom *CdRom) AckReadToc() {
 	} else {
 		rxDelay = 11000
 	}
+
+	cdrom.ReadState.State = READ_STATE_IDLE
+	cdrom.ReadState.Delay = 0
 
 	cdrom.RxPending(
 		rxDelay,
@@ -399,14 +434,20 @@ func (cdrom *CdRom) AckGetId() {
 	cdrom.RxPending(7336, 7336+12376, IRQ_CODE_DONE, response)
 }
 
-// Execute seek command
-func (cdrom *CdRom) CommandSeekL() {
+// Execute seek
+func (cdrom *CdRom) DoSeek() {
 	// make sure we're not on track 1's pregap
 	if cdrom.SeekTarget.ToU32() < MsfFromBcd(0x00, 0x02, 0x00).ToU32() {
 		panicFmt("cdrom: seek to track 1's pregap %s", cdrom.SeekTarget)
 	}
 
 	cdrom.Position = cdrom.SeekTarget
+	cdrom.SeekTargetPending = false
+}
+
+// Execute seek command
+func (cdrom *CdRom) CommandSeekL() {
+	cdrom.DoSeek()
 	cdrom.OnAcknowledge = cdrom.AckSeekL
 
 	cdrom.RxPending(
@@ -441,8 +482,9 @@ func (cdrom *CdRom) CommandSetMode() {
 
 	mode := cdrom.Params.Pop()
 	cdrom.DoubleSpeed = (mode & 0x80) != 0
+	cdrom.ReadWholeSector = (mode & 0x20) != 0
 
-	if mode&0x7f != 0 {
+	if mode&0x5f != 0 {
 		panicFmt("cdrom: unhandled mode 0x%x", mode)
 	}
 
@@ -487,6 +529,10 @@ func (cdrom *CdRom) CommandReadN() {
 		panic("cdrom: ReadN call while reading")
 	}
 
+	if cdrom.SeekTargetPending {
+		cdrom.DoSeek() // FIXME: this does not happen instantly
+	}
+
 	readDelay := cdrom.CyclesPerSector()
 	cdrom.ReadState.State = READ_STATE_READING
 	cdrom.ReadState.Delay = readDelay
@@ -514,6 +560,7 @@ func (cdrom *CdRom) CommandSetLoc() {
 	s := cdrom.Params.Pop()
 	f := cdrom.Params.Pop()
 	cdrom.SeekTarget = MsfFromBcd(m, s, f)
+	cdrom.SeekTargetPending = true
 
 	if cdrom.Disc != nil {
 		cdrom.RxPending(
@@ -715,11 +762,12 @@ func (cdrom *CdRom) HandleIdleState(th *TimeHandler) {
 
 // Read a byte from the RX buffer
 func (cdrom *CdRom) GetByte() byte {
-	if cdrom.RxIndex >= 0x800 {
+	if cdrom.RxIndex >= cdrom.RxLen {
 		panic("cdrom: RX read reached 0x800")
 	}
 
-	v := cdrom.RxSector.DataByte(cdrom.RxIndex)
+	idx := cdrom.RxOffset + cdrom.RxIndex
+	v := cdrom.RxSector.DataByte(idx)
 
 	if cdrom.RxActive {
 		cdrom.RxIndex++
@@ -756,6 +804,14 @@ func (cdrom *CdRom) SectorRead(irqState *IrqState) {
 		panicFmt("cdrom: failed to read sector %s", position)
 	}
 	cdrom.RxSector = sector
+
+	if cdrom.ReadWholeSector {
+		cdrom.RxOffset = 12
+		cdrom.RxLen = 2340
+	} else {
+		cdrom.RxOffset = 24
+		cdrom.RxLen = 2048
+	}
 
 	if cdrom.IrqFlags == 0 {
 		cdrom.Response = NewFIFOFromBytes([]byte{cdrom.DriveStatus()})

@@ -127,9 +127,7 @@ func (cpu *CPU) RunNextInstruction() {
 	}
 
 	// copy the output registers as input for the next instruction
-	// FIXME: this is copying 128 bytes of registers for each instruction,
-	//        there could be a better way to do this
-	cpu.Regs = cpu.OutRegs
+	copy(cpu.Regs[:], cpu.OutRegs[:])
 }
 
 func (cpu *CPU) FetchInstruction() Instruction {

@@ -68,7 +68,7 @@ func (cop *Cop0) EnterException(cause Exception, pc uint32, inDelaySlot bool) ui
 // Discard the current state of the status register
 func (cop *Cop0) ReturnFromException() {
 	mode := cop.SR & 0x3f
-	cop.SR = uint32(int64(cop.SR) & ^0x3f)
+	cop.SR = uint32(int64(cop.SR) & ^0xf)
 	cop.SR |= mode >> 2
 }
 

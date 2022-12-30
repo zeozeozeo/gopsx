@@ -178,7 +178,6 @@ func (gte *GTE) SetData(reg, val uint32) {
 		x, y := int16(val), int16(val>>16)
 		gte.XyFifo[2][0] = x
 		gte.XyFifo[2][1] = y
-		// TODO
 		gte.XyFifo[3][0] = x
 		gte.XyFifo[3][1] = y
 	case 16:
@@ -270,7 +269,6 @@ func (gte *GTE) Data(reg uint32) uint32 {
 		return uint32(gte.ZFifo[2])
 	case 19:
 		return uint32(gte.ZFifo[3])
-	// TODO
 	case 22:
 		r := uint32(gte.RgbFifo[2][0])
 		g := uint32(gte.RgbFifo[2][1])
@@ -280,7 +278,6 @@ func (gte *GTE) Data(reg uint32) uint32 {
 		r |= b << 16
 		r |= c << 24
 		return r
-	// TODO
 	case 24:
 		return uint32(gte.Mac[0])
 	case 25:
@@ -294,7 +291,6 @@ func (gte *GTE) Data(reg uint32) uint32 {
 		v1 := saturate(gte.Ir[2] >> 7)
 		v2 := saturate(gte.Ir[3] >> 7)
 		return v0 | (v1 << 5) | (v2 << 10)
-	// TODO
 	case 31:
 		return uint32(gte.Lzcr)
 	default:
@@ -600,9 +596,9 @@ func (gte *GTE) DoRTP(config CommandConfig, vectorIndex int) uint32 {
 	// push it to the XY fifo
 	gte.XyFifo[3][0] = gte.I32ToI11Saturate(0, screenX)
 	gte.XyFifo[3][1] = gte.I32ToI11Saturate(1, screenY)
-	gte.XyFifo[0] = gte.XyFifo[1]
-	gte.XyFifo[1] = gte.XyFifo[2]
-	gte.XyFifo[2] = gte.XyFifo[3]
+	copy(gte.XyFifo[0][:], gte.XyFifo[1][:])
+	copy(gte.XyFifo[1][:], gte.XyFifo[2][:])
+	copy(gte.XyFifo[2][:], gte.XyFifo[3][:])
 
 	return projectionFactor
 }
@@ -703,8 +699,8 @@ func (gte *GTE) MacToRgbFifo() {
 	b := gte.macToColor(mac3, 2)
 
 	c := gte.Rgb[3]
-	gte.RgbFifo[0] = gte.RgbFifo[1]
-	gte.RgbFifo[1] = gte.RgbFifo[2]
+	copy(gte.RgbFifo[0][:], gte.RgbFifo[1][:])
+	copy(gte.RgbFifo[1][:], gte.RgbFifo[2][:])
 	gte.RgbFifo[2][0] = r
 	gte.RgbFifo[2][1] = g
 	gte.RgbFifo[2][2] = b

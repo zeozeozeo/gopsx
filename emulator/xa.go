@@ -10,8 +10,7 @@ var XA_SECTOR_SYNC_PATTERN = []byte{
 }
 
 type XaSector struct {
-	Data       [SECTOR_SIZE]byte // Data
-	DataOffset uint16            // Offset of the first data byte in the sector
+	Data [SECTOR_SIZE]byte // Data
 }
 
 func NewXaSector() *XaSector {
@@ -19,12 +18,11 @@ func NewXaSector() *XaSector {
 }
 
 func (sector *XaSector) DataByte(index uint16) byte {
-	index += sector.DataOffset
 	return sector.Data[index]
 }
 
 func (sector *XaSector) DataBytes() []byte {
-	return sector.Data[sector.DataOffset:]
+	return sector.Data[:]
 }
 
 func (sector *XaSector) Msf() Msf {
@@ -82,8 +80,6 @@ func (sector *XaSector) ValidateMode2() error {
 		)
 	}
 
-	sector.DataOffset = 24
-
 	if submode&0x20 != 0 {
 		return sector.ValidateMode2Form2()
 	}
@@ -106,5 +102,7 @@ func (sector *XaSector) ValidateMode2Form1() error {
 }
 
 func (sector *XaSector) ValidateMode2Form2() error {
-	panic("xa: not implemented")
+	// panic("xa: not implemented")
+	// ignore this for now
+	return nil
 }

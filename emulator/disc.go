@@ -29,14 +29,14 @@ func GetHardwareFromRegion(region Region) HardwareType {
 
 // A PlayStation disc
 type Disc struct {
-	File   io.ReadSeeker // BIN reader
+	Reader   io.ReadSeeker // BIN reader
 	Region Region
 }
 
 // Creates a new disc instance
 func NewDisc(r io.ReadSeeker) (*Disc, error) {
 	disc := &Disc{
-		File: r,
+		Reader: r,
 	}
 	err := disc.IdentifyRegion()
 	if err != nil {
@@ -66,7 +66,7 @@ func (disc *Disc) IdentifyRegion() error {
 		panic(err)
 	}
 
-	licenseData := sector.DataBytes()[0:76]
+	licenseData := sector.DataBytes()[24:100]
 
 	// only leave characters A-z
 	var license string
@@ -102,7 +102,7 @@ func (disc *Disc) ReadDataSector(msf Msf) (*XaSector, error) {
 func (disc *Disc) ReadSector(msf Msf) (*XaSector, error) {
 	index := msf.SectorIndex() - 150 // TODO: parse cuesheet
 	pos := uint64(index) * SECTOR_SIZE
-	_, err := disc.File.Seek(int64(pos), io.SeekStart)
+	_, err := disc.Reader.Seek(int64(pos), io.SeekStart)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +111,7 @@ func (disc *Disc) ReadSector(msf Msf) (*XaSector, error) {
 	nread := 0
 
 	for uint64(nread) < SECTOR_SIZE {
-		n, err := disc.File.Read(sector.Data[nread:])
+		n, err := disc.Reader.Read(sector.Data[nread:])
 		if err != nil {
 			return nil, err
 		}
