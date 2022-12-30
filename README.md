@@ -5,7 +5,7 @@
 1. Get a PlayStation 1 BIOS.
 2. To boot the BIOS, run `<command> -bios "BIOS_PATH_HERE"`. The default BIOS path is `SCPH1001.BIN` for now.
 3. To insert a disc, specify it's path with `<command> -disc "DISC_PATH_HERE"`. It should be a `.bin` file (`.cue` files are not supported yet)
-4. You can see other arguments by running `<command> -h`
+4. You can see other arguments by running `<command> -h`. To set boolean arguments, use `<command> -arg=true` or `-arg=false`
 
 # Status
 

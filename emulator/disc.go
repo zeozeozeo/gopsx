@@ -29,7 +29,7 @@ func GetHardwareFromRegion(region Region) HardwareType {
 
 // A PlayStation disc
 type Disc struct {
-	Reader   io.ReadSeeker // BIN reader
+	Reader io.ReadSeeker // BIN reader
 	Region Region
 }
 
