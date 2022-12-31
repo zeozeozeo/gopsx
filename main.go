@@ -256,9 +256,12 @@ func main() {
 	}
 
 	g := &ebitenGame{}
-	go startEmulator(g, *biosPath, *nogui)
 	if !*nogui {
+		go startEmulator(g, *biosPath, *nogui)
 		startEbitenWindow(g)
+	} else {
+		// run on main thread
+		startEmulator(g, *biosPath, *nogui)
 	}
 }
 
