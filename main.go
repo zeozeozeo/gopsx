@@ -235,6 +235,10 @@ func main() {
 	showCycles = flag.Bool("cycles", true, "show amount of CPU cycles")
 	doRecover = flag.Bool("recover", true, "recover from emulator panics")
 	discPath := flag.String("disc", "", "disc .BIN path")
+	nogui := flag.Bool(
+		"nogui", false,
+		"whether to run without the GUI (useful for debugging)",
+	)
 	flag.Parse()
 
 	if *discPath != "" {
@@ -252,11 +256,13 @@ func main() {
 	}
 
 	g := &ebitenGame{}
-	go startEmulator(g, *biosPath)
-	startEbitenWindow(g)
+	go startEmulator(g, *biosPath, *nogui)
+	if !*nogui {
+		startEbitenWindow(g)
+	}
 }
 
-func startEmulator(g *ebitenGame, biosPath string) {
+func startEmulator(g *ebitenGame, biosPath string, nogui bool) {
 	// start emulator
 	bios := loadBios(biosPath)
 	ram := emulator.NewRAM()
@@ -267,7 +273,10 @@ func startEmulator(g *ebitenGame, biosPath string) {
 	}
 	gpu = emulator.NewGPU(hardware)
 
-	gpu.SetFrameEnd(g.drawFrame)
+	if !nogui {
+		gpu.SetFrameEnd(g.drawFrame)
+	}
+
 	inter := emulator.NewInterconnect(bios, ram, gpu, disc)
 	cpu = emulator.NewCPU(inter)
 
