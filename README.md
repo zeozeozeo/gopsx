@@ -6,6 +6,7 @@
 2. To boot the BIOS, run `<command> -bios "BIOS_PATH_HERE"`. The default BIOS path is `SCPH1001.BIN` for now.
 3. To insert a disc, specify it's path with `<command> -disc "DISC_PATH_HERE"`. It should be a `.bin` file (`.cue` files are not supported yet)
 4. You can see other arguments by running `<command> -h`. To set boolean arguments, use `<command> -arg=true` or `-arg=false`
+5. You can run tests by running `go test`
 
 # Status
 
@@ -22,13 +23,11 @@ Implemented:
 
 ## Images
 
-You can click on an image to see how it should look like
+![Boot animation](https://cdn.discordapp.com/attachments/783966433641365504/1056906583193432094/image.png)
 
-[![Boot animation](https://cdn.discordapp.com/attachments/783966433641365504/1056906583193432094/image.png)](https://cdn.discordapp.com/attachments/783966433641365504/1058378226222760027/image.png)
+![BIOS main menu](https://cdn.discordapp.com/attachments/783966433641365504/1056906529271455804/image.png)
 
-[![BIOS main menu](https://cdn.discordapp.com/attachments/783966433641365504/1056906529271455804/image.png)](https://cdn.discordapp.com/attachments/783966433641365504/1058378809574948924/image.png)
-
-[![BIOS logo](https://cdn.discordapp.com/attachments/783966433641365504/1058376979772100638/image.png)](https://cdn.discordapp.com/attachments/783966433641365504/1058378941158666371/image.png)
+![BIOS logo](https://cdn.discordapp.com/attachments/783966433641365504/1059423929770459146/image.png)
 
 # Other
 

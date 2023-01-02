@@ -45,73 +45,56 @@ func NewGTE() *GTE {
 // Set value of a control register
 func (gte *GTE) SetControl(reg, val uint32) {
 	// TODO: there should be a store delay when setting a GTE register
+	// TODO: make this cleaner :P
 	switch reg {
 	case 0:
-		matrix := gte.Matrices[MATRIX_ROTATION]
-		matrix[0][0] = int16(val)
-		matrix[0][1] = int16(val >> 16)
+		gte.Matrices[MATRIX_ROTATION][0][0] = int16(val)
+		gte.Matrices[MATRIX_ROTATION][0][1] = int16(val >> 16)
 	case 1:
-		matrix := gte.Matrices[MATRIX_ROTATION]
-		matrix[0][2] = int16(val)
-		matrix[1][0] = int16(val >> 16)
+		gte.Matrices[MATRIX_ROTATION][0][2] = int16(val)
+		gte.Matrices[MATRIX_ROTATION][1][0] = int16(val >> 16)
 	case 2:
-		matrix := gte.Matrices[MATRIX_ROTATION]
-		matrix[1][1] = int16(val)
-		matrix[1][2] = int16(val >> 16)
+		gte.Matrices[MATRIX_ROTATION][1][1] = int16(val)
+		gte.Matrices[MATRIX_ROTATION][1][2] = int16(val >> 16)
 	case 3:
-		matrix := gte.Matrices[MATRIX_ROTATION]
-		matrix[2][0] = int16(val)
-		matrix[2][1] = int16(val >> 16)
+		gte.Matrices[MATRIX_ROTATION][2][0] = int16(val)
+		gte.Matrices[MATRIX_ROTATION][2][1] = int16(val >> 16)
 	case 4:
-		matrix := gte.Matrices[MATRIX_ROTATION]
-		matrix[2][2] = int16(val)
+		gte.Matrices[MATRIX_ROTATION][2][2] = int16(val)
 	case 5, 6, 7:
-		vector := gte.CtrlVectors[CV_TRANSLATION]
-		vector[reg-5] = int32(val)
+		gte.CtrlVectors[CV_TRANSLATION][reg-5] = int32(val)
 	case 8:
-		matrix := gte.Matrices[MATRIX_LIGHT]
-		matrix[0][0] = int16(val)
-		matrix[0][1] = int16(val >> 16)
+		gte.Matrices[MATRIX_LIGHT][0][0] = int16(val)
+		gte.Matrices[MATRIX_LIGHT][0][1] = int16(val >> 16)
 	case 9:
-		matrix := gte.Matrices[MATRIX_LIGHT]
-		matrix[0][2] = int16(val)
-		matrix[1][0] = int16(val >> 16)
+		gte.Matrices[MATRIX_LIGHT][0][2] = int16(val)
+		gte.Matrices[MATRIX_LIGHT][1][0] = int16(val >> 16)
 	case 10:
-		matrix := gte.Matrices[MATRIX_LIGHT]
-		matrix[1][1] = int16(val)
-		matrix[1][2] = int16(val >> 16)
+		gte.Matrices[MATRIX_LIGHT][1][1] = int16(val)
+		gte.Matrices[MATRIX_LIGHT][1][2] = int16(val >> 16)
 	case 11:
-		matrix := gte.Matrices[MATRIX_LIGHT]
-		matrix[2][0] = int16(val)
-		matrix[2][1] = int16(val >> 16)
+		gte.Matrices[MATRIX_LIGHT][2][0] = int16(val)
+		gte.Matrices[MATRIX_LIGHT][2][1] = int16(val >> 16)
 	case 12:
-		matrix := gte.Matrices[MATRIX_LIGHT]
-		matrix[2][2] = int16(val)
+		gte.Matrices[MATRIX_LIGHT][2][2] = int16(val)
 	case 13, 14, 15:
-		vector := gte.CtrlVectors[CV_BACKGROUNDCOLOR]
-		vector[reg-13] = int32(val)
+		gte.CtrlVectors[CV_BACKGROUNDCOLOR][reg-13] = int32(val)
 	case 16:
-		matrix := gte.Matrices[MATRIX_COLOR]
-		matrix[0][0] = int16(val)
-		matrix[0][1] = int16(val >> 16)
+		gte.Matrices[MATRIX_COLOR][0][0] = int16(val)
+		gte.Matrices[MATRIX_COLOR][0][1] = int16(val >> 16)
 	case 17:
-		matrix := gte.Matrices[MATRIX_COLOR]
-		matrix[0][2] = int16(val)
-		matrix[1][0] = int16(val >> 16)
+		gte.Matrices[MATRIX_COLOR][0][2] = int16(val)
+		gte.Matrices[MATRIX_COLOR][1][0] = int16(val >> 16)
 	case 18:
-		matrix := gte.Matrices[MATRIX_COLOR]
-		matrix[1][1] = int16(val)
-		matrix[1][2] = int16(val >> 16)
+		gte.Matrices[MATRIX_COLOR][1][1] = int16(val)
+		gte.Matrices[MATRIX_COLOR][1][2] = int16(val >> 16)
 	case 19:
-		matrix := gte.Matrices[MATRIX_COLOR]
-		matrix[2][0] = int16(val)
-		matrix[2][1] = int16(val >> 16)
+		gte.Matrices[MATRIX_COLOR][2][0] = int16(val)
+		gte.Matrices[MATRIX_COLOR][2][1] = int16(val >> 16)
 	case 20:
-		matrix := gte.Matrices[MATRIX_COLOR]
-		matrix[2][2] = int16(val)
+		gte.Matrices[MATRIX_COLOR][2][2] = int16(val)
 	case 21, 22, 23:
-		vector := gte.CtrlVectors[CV_FARCOLOR]
-		vector[reg-21] = int32(val)
+		gte.CtrlVectors[CV_FARCOLOR][reg-21] = int32(val)
 	case 24:
 		gte.Ofx = int32(val)
 	case 25:
