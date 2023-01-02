@@ -33,6 +33,7 @@ type GTE struct {
 	RgbFifo     [3][4]uint8    // RGB fifo
 	Lzcs        uint32         // Input value for `Lzcr`
 	Lzcr        uint8          // Number of leading zeroes in `Lzcs`
+	Reg23       uint32         // Not used for anything
 }
 
 // Returns a new GTE instance
@@ -163,6 +164,13 @@ func (gte *GTE) SetData(reg, val uint32) {
 		gte.XyFifo[2][1] = y
 		gte.XyFifo[3][0] = x
 		gte.XyFifo[3][1] = y
+	case 15:
+		x, y := int16(val), int16(val>>16)
+		gte.XyFifo[3][0] = x
+		gte.XyFifo[3][1] = y
+		copy(gte.XyFifo[0][:], gte.XyFifo[1][:])
+		copy(gte.XyFifo[1][:], gte.XyFifo[2][:])
+		copy(gte.XyFifo[2][:], gte.XyFifo[3][:])
 	case 16:
 		gte.ZFifo[0] = uint16(val)
 	case 17:
@@ -171,11 +179,23 @@ func (gte *GTE) SetData(reg, val uint32) {
 		gte.ZFifo[2] = uint16(val)
 	case 19:
 		gte.ZFifo[3] = uint16(val)
+	case 20:
+		gte.RgbFifo[0][0] = uint8(val)
+		gte.RgbFifo[0][1] = uint8(val >> 8)
+		gte.RgbFifo[0][2] = uint8(val >> 16)
+		gte.RgbFifo[0][3] = uint8(val >> 24)
+	case 21:
+		gte.RgbFifo[1][0] = uint8(val)
+		gte.RgbFifo[1][1] = uint8(val >> 8)
+		gte.RgbFifo[1][2] = uint8(val >> 16)
+		gte.RgbFifo[1][3] = uint8(val >> 24)
 	case 22:
 		gte.RgbFifo[2][0] = uint8(val)
 		gte.RgbFifo[2][1] = uint8(val >> 8)
 		gte.RgbFifo[2][2] = uint8(val >> 16)
 		gte.RgbFifo[2][3] = uint8(val >> 24)
+	case 23:
+		gte.Reg23 = val
 	case 24:
 		gte.Mac[0] = int32(val)
 	case 25:
@@ -184,6 +204,11 @@ func (gte *GTE) SetData(reg, val uint32) {
 		gte.Mac[2] = int32(val)
 	case 27:
 		gte.Mac[3] = int32(val)
+	case 28:
+		gte.Ir[0] = int16((val & 0x1f) << 7)
+		gte.Ir[1] = int16(((val >> 5) & 0x1f) << 7)
+		gte.Ir[2] = int16(((val >> 10) & 0x1f) << 7)
+	case 29:
 	case 30:
 		gte.Lzcs = val
 		var temp uint32
@@ -261,15 +286,26 @@ func (gte *GTE) Data(reg uint32) uint32 {
 		return uint32(gte.ZFifo[2])
 	case 19:
 		return uint32(gte.ZFifo[3])
+	case 20:
+		r := uint32(gte.RgbFifo[0][0])
+		g := uint32(gte.RgbFifo[0][1])
+		b := uint32(gte.RgbFifo[0][2])
+		c := uint32(gte.RgbFifo[0][3])
+		return r | (g << 8) | (b << 16) | (c << 24)
+	case 21:
+		r := uint32(gte.RgbFifo[1][0])
+		g := uint32(gte.RgbFifo[1][1])
+		b := uint32(gte.RgbFifo[1][2])
+		c := uint32(gte.RgbFifo[1][3])
+		return r | (g << 8) | (b << 16) | (c << 24)
 	case 22:
 		r := uint32(gte.RgbFifo[2][0])
 		g := uint32(gte.RgbFifo[2][1])
 		b := uint32(gte.RgbFifo[2][2])
 		c := uint32(gte.RgbFifo[2][3]) // gp0 command
-		r |= g << 8
-		r |= b << 16
-		r |= c << 24
-		return r
+		return r | (g << 8) | (b << 16) | (c << 24)
+	case 23:
+		return gte.Reg23
 	case 24:
 		return uint32(gte.Mac[0])
 	case 25:
@@ -283,6 +319,8 @@ func (gte *GTE) Data(reg uint32) uint32 {
 		v1 := saturate(gte.Ir[2] >> 7)
 		v2 := saturate(gte.Ir[3] >> 7)
 		return v0 | (v1 << 5) | (v2 << 10)
+	case 30:
+		return gte.Lzcs
 	case 31:
 		return uint32(gte.Lzcr)
 	default:
@@ -435,6 +473,10 @@ func (gte *GTE) Command(cmd uint32) {
 }
 
 func (gte *GTE) CommandMVMVA(config CommandConfig) {
+	gte.V[3][0] = gte.Ir[1]
+	gte.V[3][1] = gte.Ir[2]
+	gte.V[3][2] = gte.Ir[3]
+
 	gte.MultiplyMatrixByVector(
 		config,
 		config.Matrix,
@@ -663,7 +705,7 @@ func (gte *GTE) MultiplyMatrixByVector(
 			m := int32(gte.Matrices[matrix][r][c])
 
 			product := v * m
-			res = gte.I64ToI44(uint8(c), res+int64(product))
+			res = gte.I64ToI44(uint8(r), res+int64(product))
 		}
 
 		// store result in accumulator
