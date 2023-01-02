@@ -156,6 +156,7 @@ type GPU struct {
 	VBlankInterrupt       bool              // True if the VBLANK interrupt is high
 	Hardware              HardwareType      // PAL or NTSC
 	ClockPhase            uint16            // Clock CPU/GPU time conversion in CPU periods
+	ReadWord              uint32            // Next GPUREAD word
 }
 
 func NewGPU(hardware HardwareType) *GPU {
@@ -507,8 +508,20 @@ func (gpu *GPU) GP1(val uint32, th *TimeHandler, irqState *IrqState, timers *Tim
 	case 0x08:
 		gpu.GP1DisplayMode(val, th, irqState)
 		timers.VideoTimingsChanged(th, irqState, gpu)
+	case 0x10:
+		gpu.GP1GetInfo(val)
 	default:
 		panicFmt("gpu: unhandled GP1 command 0x%x", val)
+	}
+}
+
+// GP1(0x10): get info
+func (gpu *GPU) GP1GetInfo(val uint32) {
+	switch val & 0xf {
+	case 7: // GPU version
+		gpu.ReadWord = 2
+	default:
+		panicFmt("gpu: unsupported GP1 info command 0x%x (%d)", val, val&0xf)
 	}
 }
 
@@ -711,8 +724,7 @@ func (gpu *GPU) Status() uint32 {
 
 // Return value of the `read` register
 func (gpu *GPU) Read() uint32 {
-	// FIXME: not implemented for now
-	return 0
+	return gpu.ReadWord
 }
 
 // Sets the function that will be called when the frame is rendered
