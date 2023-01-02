@@ -56,7 +56,8 @@ type CommandConfig struct {
 	Shift         uint8  // Right shift value
 	ClampNegative bool   // Clamp negative results to 0
 	Matrix        Matrix // MVMVA command matrix
-	CtrlVector    ControlVector
+	VectorMul     uint8  // Vector index
+	VectorAdd     ControlVector
 }
 
 func CommandConfigFromCommand(cmd uint32) CommandConfig {
@@ -64,13 +65,16 @@ func CommandConfigFromCommand(cmd uint32) CommandConfig {
 	if cmd&(1<<19) != 0 {
 		shift = 12
 	}
+
 	clampNegative := cmd&(1<<10) != 0
+	vectorIndex := (cmd >> 15) & 3
 
 	return CommandConfig{
 		Shift:         shift,
 		ClampNegative: clampNegative,
 		Matrix:        MatrixFromCommand(cmd),
-		CtrlVector:    ControlVectorFromCommand(cmd),
+		VectorMul:     uint8(vectorIndex),
+		VectorAdd:     ControlVectorFromCommand(cmd),
 	}
 }
 

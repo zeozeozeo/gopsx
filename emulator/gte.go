@@ -422,6 +422,9 @@ func (gte *GTE) Command(cmd uint32) {
 	case 0x30:
 		config := CommandConfigFromCommand(cmd)
 		gte.CommandRTPT(config)
+	case 0x12:
+		config := CommandConfigFromCommand(cmd)
+		gte.CommandMVMVA(config)
 	default:
 		panicFmt("gte: unhandled command 0x%x (opcode 0x%x)", cmd, opcode)
 	}
@@ -429,6 +432,15 @@ func (gte *GTE) Command(cmd uint32) {
 	// flags MSB [30:23] + [18:13]
 	msb := gte.Flags&0x7f87e000 != 0
 	gte.Flags |= oneIfTrue(msb) << 31
+}
+
+func (gte *GTE) CommandMVMVA(config CommandConfig) {
+	gte.MultiplyMatrixByVector(
+		config,
+		config.Matrix,
+		int(config.VectorMul),
+		config.VectorAdd,
+	)
 }
 
 // Normal clipping
