@@ -152,10 +152,12 @@ func (cdrom *CdRom) Status() uint8 {
 	// TODO: XA-ADPCM fifo empty
 	r |= 0 << 2
 	r |= uint8(oneIfTrue(cdrom.Params.IsEmpty())) << 3
-	r |= uint8(oneIfTrue(cdrom.Params.IsFull())) << 4
-	r |= uint8(oneIfTrue(cdrom.Response.IsEmpty())) << 5
-	// TODO: Data fifo empty
-	r |= 0 << 6
+	r |= uint8(oneIfTrue(!cdrom.Params.IsFull())) << 4
+	r |= uint8(oneIfTrue(!cdrom.Response.IsEmpty())) << 5
+
+	dataAvailable := cdrom.RxIndex < cdrom.RxLen
+	r |= uint8(oneIfTrue(dataAvailable)) << 6
+
 	// Command/parameter transmission busy
 	if cdrom.CmdState.State == CMD_STATE_RXPENDING {
 		r |= 1 << 7
