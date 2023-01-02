@@ -5,7 +5,7 @@ import "testing"
 func TestDivision(t *testing.T) {
 	assert := func(res, want uint32) {
 		if res != want {
-			t.Errorf("expected 0x%x, got 0x%x", res, want)
+			t.Errorf("got 0x%x, expected 0x%x", res, want)
 		}
 	}
 
