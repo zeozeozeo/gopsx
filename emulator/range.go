@@ -31,6 +31,8 @@ var (
 	PADMEMCARD_RANGE = NewRange(0x1f801040, 32)
 	// 1kb fast ScratchPad RAM
 	SCRATCHPAD_RANGE = NewRange(0x1f800000, 1024)
+	// MDEC registers range
+	MDEC_RANGE = NewRange(0x1f801820, 8)
 )
 
 type Range struct {

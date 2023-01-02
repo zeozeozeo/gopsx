@@ -114,6 +114,10 @@ func (inter *Interconnect) Load(addr uint32, size AccessSize, th *TimeHandler) i
 		}
 		return inter.ScratchPad.Load(offset, size)
 	}
+	if ok, offset := MDEC_RANGE.ContainsAndOffset(absAddr); ok {
+		fmt.Printf("inter: ignoring read from MDEC register %d\n", offset)
+		return accessSizeU32(size, 0)
+	}
 
 	panicFmt("inter: unhandled load at address 0x%x", addr)
 	return accessSizeU32(size, 0)
@@ -203,6 +207,10 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}, 
 			panic("inter: scratchpad write through uncached memory")
 		}
 		inter.ScratchPad.Store(offset, size, val)
+		return
+	}
+	if ok, offset := MDEC_RANGE.ContainsAndOffset(absAddr); ok {
+		fmt.Printf("inter: ignoring write to MDEC register %d\n", offset)
 		return
 	}
 
