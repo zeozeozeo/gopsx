@@ -89,6 +89,7 @@ type CdRom struct {
 	RxLen             uint16         // RX sector last byte index
 	RxOffset          uint16         // RX index offset
 	ReadWholeSector   bool           // Reads 0x924 bytes of the sector if true, 0x800 if false
+	Mixer             *Mixer         // CD-DA audio mixer (connected to the SPU)
 }
 
 // Disc can be nil
@@ -103,6 +104,7 @@ func NewCdRom(disc *Disc) *CdRom {
 		Position:        NewMsf(),
 		RxSector:        NewXaSector(),
 		ReadWholeSector: true,
+		Mixer:           NewMixer(),
 	}
 	cdrom.OnAcknowledge = cdrom.AckIdle
 	return cdrom
@@ -643,6 +645,8 @@ func (cdrom *CdRom) Store(
 		switch index {
 		case 0:
 			cdrom.Command(val, irqState, th)
+		case 3:
+			cdrom.Mixer.CdRightToSpuRight = val
 		default:
 			panic("cdrom: not implemented")
 		}
@@ -652,6 +656,9 @@ func (cdrom *CdRom) Store(
 			cdrom.PushParam(val)
 		case 1:
 			cdrom.SetIrqMask(val)
+		case 2:
+			cdrom.Mixer.CdLeftToSpuLeft = val
+			cdrom.Mixer.CdRightToSpuLeft = val
 		default:
 			panic("cdrom: not implemented")
 		}
@@ -667,6 +674,10 @@ func (cdrom *CdRom) Store(
 			if val&0xa0 != 0 {
 				panic("cdrom: not implemented")
 			}
+		case 2:
+			cdrom.Mixer.CdLeftToSpuRight = val
+		case 3:
+			fmt.Printf("cdrom: mixer apply 0x%x\n", val)
 		default:
 			panic("cdrom: not implemented")
 		}
