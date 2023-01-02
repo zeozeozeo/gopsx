@@ -289,6 +289,8 @@ func (card *PadMemCard) Load(
 		return accessSizeU32(size, card.Status())
 	case 10:
 		return accessSizeU16(size, card.Control())
+	case 14:
+		return accessSizeU32(size, uint32(card.BaudDiv))
 	default:
 		panicFmt("gamepad: unhandled read from register %d", offset)
 	}

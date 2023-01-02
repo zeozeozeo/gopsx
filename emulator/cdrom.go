@@ -686,8 +686,6 @@ func (cdrom *CdRom) Store(
 	}
 }
 
-// SYNC ////////////////////////////////////////////
-
 func (cdrom *CdRom) Sync(th *TimeHandler, irqState *IrqState) {
 	delta := th.Sync(PERIPHERAL_CDROM)
 
