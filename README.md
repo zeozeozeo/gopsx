@@ -19,7 +19,7 @@ Implemented:
 -   Gamepad (still needs testing)
 -   Interrupts
 -   GPU (not much)
--   GTE (very simple implementation, doesn't seem to work at this moment)
+-   GTE (very simple implementation, can display the PlayStation logo)
 
 ## Images
 
