@@ -29,6 +29,8 @@ var (
 	CDROM_RANGE = NewRange(0x1f801800, 0x4)
 	// Controller and memory card range
 	PADMEMCARD_RANGE = NewRange(0x1f801040, 32)
+	// 1kb fast ScratchPad RAM
+	SCRATCHPAD_RANGE = NewRange(0x1f800000, 1024)
 )
 
 type Range struct {

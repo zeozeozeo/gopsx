@@ -18,6 +18,7 @@ type Interconnect struct {
 	PadMemCard *PadMemCard  // Gamepad and memory card
 	MemControl [9]uint32    // Memory control registers
 	RamSize    uint32       // RAM_SIZE register
+	ScratchPad *ScratchPad
 }
 
 // Mask array used to strip the region bits of a CPU address. The mask
@@ -47,6 +48,7 @@ func NewInterconnect(bios *BIOS, ram *RAM, gpu *GPU, disc *Disc) *Interconnect {
 		CdRom:      NewCdRom(disc),
 		Gte:        NewGTE(),
 		PadMemCard: NewPadMemCard(),
+		ScratchPad: NewScratchPad(),
 	}
 	return inter
 }
@@ -105,6 +107,12 @@ func (inter *Interconnect) Load(addr uint32, size AccessSize, th *TimeHandler) i
 	}
 	if RAMSIZE_RANGE.Contains(absAddr) {
 		return accessSizeU32(size, inter.RamSize)
+	}
+	if ok, offset := SCRATCHPAD_RANGE.ContainsAndOffset(absAddr); ok {
+		if addr > 0xa0000000 {
+			panic("inter: scratchpad read through uncached memory")
+		}
+		return inter.ScratchPad.Load(offset, size)
 	}
 
 	panicFmt("inter: unhandled load at address 0x%x", addr)
@@ -188,6 +196,13 @@ func (inter *Interconnect) Store(addr uint32, size AccessSize, val interface{}, 
 	}
 	if ok, offset := PADMEMCARD_RANGE.ContainsAndOffset(absAddr); ok {
 		inter.PadMemCard.Store(offset, val, size, th, inter.IrqState)
+		return
+	}
+	if ok, offset := SCRATCHPAD_RANGE.ContainsAndOffset(absAddr); ok {
+		if addr > 0xa0000000 {
+			panic("inter: scratchpad write through uncached memory")
+		}
+		inter.ScratchPad.Store(offset, size, val)
 		return
 	}
 
