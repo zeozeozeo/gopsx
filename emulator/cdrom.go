@@ -306,6 +306,8 @@ func (cdrom *CdRom) Command(cmd uint8, irqState *IrqState, th *TimeHandler) {
 		handler = cdrom.CommandReadToc
 	case 0x19:
 		handler = cdrom.CommandTest
+	case 0x0c:
+		handler = cdrom.CommandDemute
 	default:
 		panicFmt("cdrom: unhandled command 0x%x", cmd)
 	}
@@ -328,6 +330,15 @@ func (cdrom *CdRom) Command(cmd uint8, irqState *IrqState, th *TimeHandler) {
 	}
 
 	cdrom.Params.Clear()
+}
+
+func (cdrom *CdRom) CommandDemute() {
+	cdrom.RxPending(
+		32000,
+		32000+5401,
+		IRQ_CODE_OK,
+		NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
+	)
 }
 
 func (cdrom *CdRom) CommandInit() {
