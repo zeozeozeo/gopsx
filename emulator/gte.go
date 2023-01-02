@@ -184,6 +184,15 @@ func (gte *GTE) SetData(reg, val uint32) {
 		gte.Mac[2] = int32(val)
 	case 27:
 		gte.Mac[3] = int32(val)
+	case 30:
+		gte.Lzcs = val
+		var temp uint32
+		if (val>>31)&1 != 0 {
+			temp = ^val
+		} else {
+			temp = val
+		}
+		gte.Lzcr = uint8(countLeadingZeroesU32(temp))
 	case 31:
 		fmt.Println("gte: write to read-only register 31")
 	default:

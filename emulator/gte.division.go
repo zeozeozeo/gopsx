@@ -37,15 +37,6 @@ var UNR_TABLE = []uint8{
 	0x00,
 }
 
-func countLeadingZeroesU16(val uint16) uint64 {
-	var r uint64
-	for ((val & 0x8000) == 0) && r < 16 {
-		val <<= 1
-		r++
-	}
-	return r
-}
-
 // Newton–Raphson division
 func GTEDivide(numerator, divisor uint16) uint32 {
 	shift := countLeadingZeroesU16(divisor)

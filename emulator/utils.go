@@ -125,3 +125,42 @@ func oneIfTrue(val bool) uint32 {
 	}
 	return 0
 }
+
+func countLeadingZeroesU16(val uint16) uint16 {
+	var r uint16
+	for ((val & 0x8000) == 0) && r < 16 {
+		val <<= 1
+		r++
+	}
+	return r
+}
+
+func countLeadingZeroesU32(x uint32) uint32 {
+	var n uint32 = 32
+	var y uint32
+	y = x >> 16
+	if y != 0 {
+		n = n - 16
+		x = y
+	}
+	y = x >> 8
+	if y != 0 {
+		n = n - 8
+		x = y
+	}
+	y = x >> 4
+	if y != 0 {
+		n = n - 4
+		x = y
+	}
+	y = x >> 2
+	if y != 0 {
+		n = n - 2
+		x = y
+	}
+	y = x >> 1
+	if y != 0 {
+		return n - 2
+	}
+	return n - x
+}

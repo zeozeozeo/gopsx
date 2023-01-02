@@ -30,6 +30,34 @@ func TestGTE(t *testing.T) {
 	}
 }
 
+func TestGteLZCR(t *testing.T) {
+	expected := [][2]uint32{
+		{0x00000000, 32},
+		{0xffffffff, 32},
+		{0x00000001, 31},
+		{0x80000000, 1},
+		{0x7fffffff, 1},
+		{0xdeadbeef, 2},
+		{0x000c0ffe, 12},
+		{0xfffc0ffe, 14},
+	}
+	assert := func(v bool) {
+		if !v {
+			t.Error("assert failed")
+		}
+	}
+
+	gte := NewGTE()
+	for _, d := range expected {
+		lzcs := d[0]
+		lzcr := d[1]
+
+		gte.SetData(30, lzcs)
+		r := gte.Data(31)
+		assert(r == lzcr)
+	}
+}
+
 func (conf *gteConfig) makeGte() *GTE {
 	gte := NewGTE()
 
