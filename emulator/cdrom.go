@@ -124,6 +124,17 @@ func NewCdRom(disc *Disc) *CdRom {
 	return cdrom
 }
 
+// Ejects the disc from the CD tray
+func (cdrom *CdRom) EjectDisc() {
+	cdrom.Disc = nil
+}
+
+// Insert a disc into the CD tray
+func (cdrom *CdRom) InsertDisc(disc *Disc) {
+	cdrom.Disc = disc
+}
+
+// Set the command state to RX pending
 func (cdrom *CdRom) RxPending(delay, irqDelay uint32, code IrqCode, response *FIFO) {
 	state := cdrom.CmdState
 	state.State = CMD_STATE_RXPENDING
@@ -136,6 +147,7 @@ func (cdrom *CdRom) RxPending(delay, irqDelay uint32, code IrqCode, response *FI
 	state.IrqPendingIrqCode = 0
 }
 
+// Set the command state to IRQ pending
 func (cdrom *CdRom) IrqPending(delay uint32, code IrqCode) {
 	state := cdrom.CmdState
 	state.State = CMD_STATE_IRQ_PENDING
@@ -148,6 +160,7 @@ func (cdrom *CdRom) IrqPending(delay uint32, code IrqCode) {
 	state.RxPendingFifo = nil
 }
 
+// Set the state to idle
 func (cdrom *CdRom) IdleState() {
 	state := cdrom.CmdState
 	state.State = CMD_STATE_IDLE
@@ -159,6 +172,7 @@ func (cdrom *CdRom) IdleState() {
 	state.RxPendingFifo = nil
 }
 
+// Returns the value of the status register
 func (cdrom *CdRom) Status() uint8 {
 	r := cdrom.Index
 
@@ -180,10 +194,12 @@ func (cdrom *CdRom) Status() uint8 {
 	return r
 }
 
+// Is in interrupt?
 func (cdrom *CdRom) Irq() bool {
 	return cdrom.IrqFlags&cdrom.IrqMask != 0
 }
 
+// Triggers an interrupt
 func (cdrom *CdRom) TriggerIrq(irq IrqCode, irqState *IrqState) {
 	if cdrom.IrqFlags != 0 {
 		panic("cdrom: nested interrupt") // TODO
@@ -197,10 +213,12 @@ func (cdrom *CdRom) TriggerIrq(irq IrqCode, irqState *IrqState) {
 	}
 }
 
+// Set index (some registers can change behaviour depending on it)
 func (cdrom *CdRom) SetIndex(index uint8) {
 	cdrom.Index = index & 3
 }
 
+// IRQ acknowledge
 func (cdrom *CdRom) AcknowledgeIrq(val uint8) {
 	cdrom.IrqFlags &= ^val
 
@@ -215,10 +233,12 @@ func (cdrom *CdRom) AcknowledgeIrq(val uint8) {
 	}
 }
 
+// Set the IRQ mask
 func (cdrom *CdRom) SetIrqMask(val uint8) {
 	cdrom.IrqMask = val & 0x1f
 }
 
+// 0x01
 func (cdrom *CdRom) CommandGetStat() {
 	if !cdrom.Params.IsEmpty() {
 		// TODO
@@ -238,6 +258,7 @@ func (cdrom *CdRom) CommandGetStat() {
 	cdrom.RxPending(rxDelay, rxDelay+5401, IRQ_CODE_OK, response)
 }
 
+// Return the drive status (many commands return it)
 func (cdrom *CdRom) DriveStatus() uint8 {
 	if cdrom.Disc != nil {
 		var r uint8
@@ -251,6 +272,7 @@ func (cdrom *CdRom) DriveStatus() uint8 {
 	return 0x10
 }
 
+// 0x19
 func (cdrom *CdRom) CommandTest() {
 	if cdrom.Params.Length() != 1 {
 		panicFmt(
@@ -268,6 +290,7 @@ func (cdrom *CdRom) CommandTest() {
 	}
 }
 
+// 0x20, called by CommandTest
 func (cdrom *CdRom) TestVersion() {
 	// values taken from Mednafen
 	response := NewFIFOFromBytes([]byte{
@@ -287,6 +310,7 @@ func (cdrom *CdRom) TestVersion() {
 	cdrom.RxPending(rxDelay, rxDelay+9711, IRQ_CODE_OK, response)
 }
 
+// Push a value to the parameter FIFO
 func (cdrom *CdRom) PushParam(param uint8) {
 	if cdrom.Params.IsFull() {
 		panic("cdrom: attempted to push param to full FIFO")
@@ -294,6 +318,7 @@ func (cdrom *CdRom) PushParam(param uint8) {
 	cdrom.Params.Push(param)
 }
 
+// Execute command
 func (cdrom *CdRom) Command(cmd uint8, irqState *IrqState, th *TimeHandler) {
 	if !cdrom.CmdState.IsIdle() {
 		panic("cdrom: received command while controller is busy")
@@ -350,6 +375,7 @@ func (cdrom *CdRom) Command(cmd uint8, irqState *IrqState, th *TimeHandler) {
 	cdrom.Params.Clear()
 }
 
+// Demute command (0x0c)
 func (cdrom *CdRom) CommandDemute() {
 	cdrom.RxPending(
 		32000,
@@ -359,6 +385,7 @@ func (cdrom *CdRom) CommandDemute() {
 	)
 }
 
+// 0xa
 func (cdrom *CdRom) CommandInit() {
 	cdrom.OnAcknowledge = cdrom.AckInit
 	cdrom.RxPending(
@@ -369,6 +396,7 @@ func (cdrom *CdRom) CommandInit() {
 	)
 }
 
+// CommandInit acknowledge
 func (cdrom *CdRom) AckInit() {
 	cdrom.IdleState()
 	cdrom.DoubleSpeed = false
@@ -396,6 +424,7 @@ func (cdrom *CdRom) CommandReadToc() {
 	)
 }
 
+// ReadToc acknowledge
 func (cdrom *CdRom) AckReadToc() {
 	var rxDelay uint32
 	if cdrom.Disc != nil {
@@ -438,6 +467,7 @@ func (cdrom *CdRom) CommandGetId() {
 	}
 }
 
+// GetId acknowledge
 func (cdrom *CdRom) AckGetId() {
 	disc := cdrom.GetDiscOrPanic()
 
@@ -486,6 +516,7 @@ func (cdrom *CdRom) CommandSeekL() {
 	)
 }
 
+// SeekL acknowledge
 func (cdrom *CdRom) AckSeekL() {
 	// FIXME: we should measure how much time it would take
 	//        for the drive to physically move the head
