@@ -211,7 +211,9 @@ func (gpu *GPU) GP0(val uint32) {
 			length, handler = 6, gpu.GP0TriangleShadedOpaque
 		case 0x38:
 			length, handler = 8, gpu.GP0QuadShadedOpaque
-		case 0x64, 0x65:
+		case 0x64:
+			length, handler = 4, gpu.GP0RectTextureBlendOpaque
+		case 0x65:
 			length, handler = 4, gpu.GP0RectTextureRawOpaque
 		case 0xa0:
 			length, handler = 3, gpu.GP0ImageLoad
@@ -254,6 +256,33 @@ func (gpu *GPU) GP0(val uint32) {
 	}
 }
 
+// GP0(0x60): Opaque monochrome rectangle
+func (gpu *GPU) GP0RectOpaque() {
+	clr := ColorFromGP0(gpu.GP0Command.Get(0))
+	topLeft := Vec2FromGP0(gpu.GP0Command.Get(1))
+	size := Vec2FromGP0(gpu.GP0Command.Get(2))
+
+	gpu.DrawData.PushQuad(
+		NewVertex(NewVec2(topLeft.X+size.X, topLeft.Y), clr),
+		NewVertex(NewVec2(topLeft.X, topLeft.Y+size.Y), clr),
+		NewVertex(NewVec2(topLeft.X+size.X, topLeft.Y+size.Y), clr),
+	)
+}
+
+// GP0(0x64): Opaque rectangle with texture blending
+func (gpu *GPU) GP0RectTextureBlendOpaque() {
+	clr := ColorFromGP0(gpu.GP0Command.Get(0))
+	topLeft := Vec2FromGP0(gpu.GP0Command.Get(1))
+	// ...
+	size := Vec2FromGP0(gpu.GP0Command.Get(3))
+
+	gpu.DrawData.PushQuad(
+		NewVertex(NewVec2(topLeft.X+size.X, topLeft.Y), clr),
+		NewVertex(NewVec2(topLeft.X, topLeft.Y+size.Y), clr),
+		NewVertex(NewVec2(topLeft.X+size.X, topLeft.Y+size.Y), clr),
+	)
+}
+
 // GP0(0x02): Fill Rectangle
 func (gpu *GPU) GP0FillRect() {
 	// TODO: this should be affected by the mask
@@ -263,9 +292,9 @@ func (gpu *GPU) GP0FillRect() {
 
 	gpu.DrawData.PushQuad(
 		NewVertex(topLeft, clr),
-		NewVertex(Vec2{topLeft.X + size.X, topLeft.Y}, clr),
-		NewVertex(Vec2{topLeft.X, topLeft.Y + size.Y}, clr),
-		NewVertex(Vec2{topLeft.X + size.X, topLeft.Y + size.Y}, clr),
+		NewVertex(NewVec2(topLeft.X+size.X, topLeft.Y), clr),
+		NewVertex(NewVec2(topLeft.X, topLeft.Y+size.Y), clr),
+		NewVertex(NewVec2(topLeft.X+size.X, topLeft.Y+size.Y), clr),
 	)
 }
 
@@ -291,9 +320,9 @@ func (gpu *GPU) GP0RectTextureRawOpaque() {
 
 	gpu.DrawData.PushQuad(
 		NewVertex(topLeft, clr),
-		NewVertex(Vec2{topLeft.X + size.X, topLeft.Y}, clr),
-		NewVertex(Vec2{topLeft.X, topLeft.Y + size.Y}, clr),
-		NewVertex(Vec2{topLeft.X + size.X, topLeft.Y + size.Y}, clr),
+		NewVertex(NewVec2(topLeft.X+size.X, topLeft.Y), clr),
+		NewVertex(NewVec2(topLeft.X, topLeft.Y+size.Y), clr),
+		NewVertex(NewVec2(topLeft.X+size.X, topLeft.Y+size.Y), clr),
 	)
 }
 

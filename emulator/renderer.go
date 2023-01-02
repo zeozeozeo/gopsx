@@ -7,6 +7,10 @@ type Vec2 struct {
 	X, Y int16
 }
 
+func NewVec2(x, y int16) Vec2 {
+	return Vec2{X: x, Y: y}
+}
+
 // A 2 dimensional vector (uint16)
 type Vec2U struct {
 	X, Y uint16
