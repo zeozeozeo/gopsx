@@ -43,16 +43,16 @@ func (cmd *CommandState) IsIdle() bool {
 	return cmd.State == CMD_STATE_IDLE
 }
 
-type CDRomReadState int
+type CdRomReadState int
 
 const (
-	READ_STATE_IDLE    CDRomReadState = iota
-	READ_STATE_READING CDRomReadState = iota
+	READ_STATE_IDLE    CdRomReadState = iota
+	READ_STATE_READING CdRomReadState = iota
 )
 
 // CD-ROM data read state
 type ReadState struct {
-	State CDRomReadState
+	State CdRomReadState
 	Delay uint32 // For READ_STATE_READING
 }
 
@@ -62,8 +62,22 @@ func NewReadState() *ReadState {
 	}
 }
 
+func (rstate *ReadState) MakeIdle() {
+	rstate.State = READ_STATE_IDLE
+	rstate.Delay = 0
+}
+
+func (rstate *ReadState) MakeReading(delay uint32) {
+	rstate.State = READ_STATE_READING
+	rstate.Delay = delay
+}
+
 func (rstate *ReadState) IsIdle() bool {
 	return rstate.State == READ_STATE_IDLE
+}
+
+func (rstate *ReadState) IsReading() bool {
+	return rstate.State == READ_STATE_READING
 }
 
 type CmdHandlerFunc func()
@@ -329,7 +343,7 @@ func (cdrom *CdRom) Command(cmd uint8, irqState *IrqState, th *TimeHandler) {
 		cdrom.OnAcknowledge = handler
 	}
 
-	if cdrom.ReadState.State == READ_STATE_READING {
+	if cdrom.ReadState.IsReading() {
 		th.SetNextSyncDeltaIfCloser(PERIPHERAL_CDROM, uint64(cdrom.ReadState.Delay))
 	}
 
@@ -390,8 +404,7 @@ func (cdrom *CdRom) AckReadToc() {
 		rxDelay = 11000
 	}
 
-	cdrom.ReadState.State = READ_STATE_IDLE
-	cdrom.ReadState.Delay = 0
+	cdrom.ReadState.MakeIdle()
 
 	cdrom.RxPending(
 		rxDelay,
@@ -527,8 +540,7 @@ func (cdrom *CdRom) CommandPause() {
 }
 
 func (cdrom *CdRom) AckPause() {
-	cdrom.ReadState.State = READ_STATE_IDLE
-	cdrom.ReadState.Delay = 0
+	cdrom.ReadState.MakeIdle()
 
 	cdrom.RxPending(
 		2000000,
@@ -549,8 +561,7 @@ func (cdrom *CdRom) CommandReadN() {
 	}
 
 	readDelay := cdrom.CyclesPerSector()
-	cdrom.ReadState.State = READ_STATE_READING
-	cdrom.ReadState.Delay = readDelay
+	cdrom.ReadState.MakeReading(readDelay)
 
 	cdrom.RxPending(
 		28000,
@@ -702,7 +713,7 @@ func (cdrom *CdRom) Sync(th *TimeHandler, irqState *IrqState) {
 	}
 
 	// check if we have a read pending
-	if cdrom.ReadState.State == READ_STATE_READING {
+	if cdrom.ReadState.IsReading() {
 		delay := cdrom.ReadState.Delay
 		var nextSync uint32
 
@@ -713,8 +724,7 @@ func (cdrom *CdRom) Sync(th *TimeHandler, irqState *IrqState) {
 			// prepare for next sector
 			nextSync = cdrom.CyclesPerSector()
 		}
-		cdrom.ReadState.State = READ_STATE_READING
-		cdrom.ReadState.Delay = nextSync
+		cdrom.ReadState.MakeReading(nextSync)
 
 		th.SetNextSyncDeltaIfCloser(PERIPHERAL_CDROM, uint64(nextSync))
 	}
