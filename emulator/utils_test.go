@@ -27,3 +27,29 @@ func TestCountLeadingZeroesU16(t *testing.T) {
 		x = (x << 1) + 1
 	}
 }
+
+func TestAbsInt64(t *testing.T) {
+	assert := func(v bool) {
+		if !v {
+			t.Error("assert failed")
+		}
+	}
+
+	assert(absInt64(-5) == 5)
+	assert(absInt64(18) == 18)
+	assert(absInt64(0) == 0)
+	assert(absInt64(-999999) == 999999)
+}
+
+func TestMaxInt64(t *testing.T) {
+	assert := func(v bool) {
+		if !v {
+			t.Error("assert failed")
+		}
+	}
+
+	assert(maxInt64(1, 2) == 2)
+	assert(maxInt64(-100, 100) == 100)
+	assert(maxInt64(888, -5) == 888)
+	assert(maxInt64(-11, -22) == -11)
+}

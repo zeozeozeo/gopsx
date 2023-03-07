@@ -30,7 +30,7 @@ func GetHardwareFromRegion(region Region) HardwareType {
 // A PlayStation disc
 type Disc struct {
 	Reader io.ReadSeeker // BIN reader
-	Region Region
+	Region Region        // Disc region
 }
 
 // Creates a new disc instance
@@ -90,7 +90,7 @@ func (disc *Disc) IdentifyRegion() error {
 	return nil
 }
 
-func (disc *Disc) ReadDataSector(msf Msf) (*XaSector, error) {
+func (disc *Disc) ReadDataSector(msf *Msf) (*XaSector, error) {
 	sector, err := disc.ReadSector(msf)
 	if err != nil {
 		return nil, err
@@ -99,7 +99,7 @@ func (disc *Disc) ReadDataSector(msf Msf) (*XaSector, error) {
 	return sector, nil
 }
 
-func (disc *Disc) ReadSector(msf Msf) (*XaSector, error) {
+func (disc *Disc) ReadSector(msf *Msf) (*XaSector, error) {
 	index := msf.SectorIndex() - 150 // TODO: parse cuesheet
 	pos := uint64(index) * SECTOR_SIZE
 	_, err := disc.Reader.Seek(int64(pos), io.SeekStart)

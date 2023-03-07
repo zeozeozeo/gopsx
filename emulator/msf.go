@@ -1,30 +1,35 @@
 package emulator
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 type Msf struct {
 	M, S, F uint8
 }
 
+var errMsfOverflow = errors.New("msf overflow")
+
 // Creates a new Msf instance (all values are 0)
-func NewMsf() Msf {
-	return Msf{}
+func NewMsf() *Msf {
+	return &Msf{}
 }
 
-func (msf Msf) String() string {
+func (msf *Msf) String() string {
 	return fmt.Sprintf("%d:%d:%d", msf.M, msf.S, msf.F)
 }
 
-func (msf Msf) Values() (uint8, uint8, uint8) {
+func (msf *Msf) Values() (uint8, uint8, uint8) {
 	return msf.M, msf.S, msf.F
 }
 
-func (msf Msf) Slice() []uint8 {
+func (msf *Msf) Slice() []uint8 {
 	return []uint8{msf.M, msf.S, msf.F}
 }
 
-func MsfFromBcd(m, s, f uint8) Msf {
-	msf := Msf{m, s, f}
+func MsfFromBcd(m, s, f uint8) *Msf {
+	msf := &Msf{m, s, f}
 
 	// check if the MSF is valid
 	for _, v := range msf.Slice() {
@@ -40,7 +45,7 @@ func MsfFromBcd(m, s, f uint8) Msf {
 }
 
 // Converts an MSF into a sector index
-func (msf Msf) SectorIndex() uint32 {
+func (msf *Msf) SectorIndex() uint32 {
 	m := uint32((msf.M>>4)*10 + (msf.M & 0xf))
 	s := uint32((msf.S>>4)*10 + (msf.S & 0xf))
 	f := uint32((msf.F>>4)*10 + (msf.F & 0xf))
@@ -48,19 +53,19 @@ func (msf Msf) SectorIndex() uint32 {
 }
 
 // Returns the MSF of the next sector
-func (msf Msf) Next() Msf {
+func (msf *Msf) Next() (*Msf, error) {
 	m, s, f := msf.Values()
 
 	if f < 0x74 {
-		return Msf{m, s, incBcd(f)}
+		return &Msf{m, s, incBcd(f)}, nil
 	}
 	if s < 0x59 {
-		return Msf{m, incBcd(s), f}
+		return &Msf{m, incBcd(s), f}, nil
 	}
 	if m < 0x99 {
-		return Msf{incBcd(m), s, f}
+		return &Msf{incBcd(m), s, f}, nil
 	}
-	panic("msf: Next() overflow")
+	return nil, errMsfOverflow
 }
 
 func incBcd(v uint8) uint8 {
@@ -70,11 +75,11 @@ func incBcd(v uint8) uint8 {
 	return (v & 0xf0) + 0x10
 }
 
-func (msf Msf) ToU32() uint32 {
+func (msf *Msf) ToU32() uint32 {
 	m, s, f := msf.Values()
 	return (uint32(m) << 16) | (uint32(s) << 8) | uint32(f)
 }
 
-func (msf Msf) IsEqual(msf2 Msf) bool {
+func (msf *Msf) IsEqual(msf2 *Msf) bool {
 	return msf.M == msf2.M && msf.S == msf2.S && msf.F == msf2.F
 }

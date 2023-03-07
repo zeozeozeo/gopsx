@@ -2,663 +2,85 @@ package emulator
 
 import "fmt"
 
-// Used by the CD-ROM controller
-type IrqCode uint8
-
-const (
-	IRQ_CODE_SECTOR_READY IrqCode = 1 // CD sector is ready
-	IRQ_CODE_DONE         IrqCode = 2 // Command successful (2nd response)
-	IRQ_CODE_OK           IrqCode = 3 // Command successful (1st response)
-	IRQ_CODE_ERROR        IrqCode = 5 // Invalid command, etc.
-)
-
-type CommandControllerState int
-
-const (
-	// Controller is idle
-	CMD_STATE_IDLE CommandControllerState = iota
-	// Controller is making a command or waiting for a return value
-	CMD_STATE_RXPENDING CommandControllerState = iota
-	// Transaction is done, but we're still waiting for an interrupt
-	CMD_STATE_IRQ_PENDING CommandControllerState = iota
-)
-
-type CommandState struct {
-	State              CommandControllerState
-	RxPendingDelay     uint32  // For CMD_STATE_RXPENDING
-	RxPendingIrqDelay  uint32  // For CMD_STATE_RXPENDING
-	RxPendingIrqCode   IrqCode // For CMD_STATE_RXPENDING
-	RxPendingFifo      *FIFO   // For CMD_STATE_RXPENDING (response)
-	IrqPendingIrqDelay uint32  // For CMD_STATE_IRQ_PENDING
-	IrqPendingIrqCode  IrqCode // For CMD_STATE_IRQ_PENDING
-}
-
-func NewCommandState() *CommandState {
-	return &CommandState{
-		State: CMD_STATE_IDLE,
-	}
-}
-
-func (cmd *CommandState) IsIdle() bool {
-	return cmd.State == CMD_STATE_IDLE
-}
-
-type CdRomReadState int
-
-const (
-	READ_STATE_IDLE    CdRomReadState = iota
-	READ_STATE_READING CdRomReadState = iota
-)
-
-// CD-ROM data read state
-type ReadState struct {
-	State CdRomReadState
-	Delay uint32 // For READ_STATE_READING
-}
-
-func NewReadState() *ReadState {
-	return &ReadState{
-		State: READ_STATE_IDLE,
-	}
-}
-
-func (rstate *ReadState) MakeIdle() {
-	rstate.State = READ_STATE_IDLE
-	rstate.Delay = 0
-}
-
-func (rstate *ReadState) MakeReading(delay uint32) {
-	rstate.State = READ_STATE_READING
-	rstate.Delay = delay
-}
-
-func (rstate *ReadState) IsIdle() bool {
-	return rstate.State == READ_STATE_IDLE
-}
-
-func (rstate *ReadState) IsReading() bool {
-	return rstate.State == READ_STATE_READING
-}
-
-type CmdHandlerFunc func()
-
 // CD-ROM controller
 type CdRom struct {
-	Index             uint8          // Some registers can change depending on the index
-	Params            *FIFO          // FIFO storing the command arguments
-	Response          *FIFO          // FIFO storing command responses
-	IrqMask           uint8          // 5 bit interrupt mask
-	IrqFlags          uint8          // 5 bit interrupt flags
-	CmdState          *CommandState  // Command state
-	ReadState         *ReadState     // Read state
-	OnAcknowledge     CmdHandlerFunc // Command handler
-	Disc              *Disc          // Currently loaded disc (can be nil)
-	SeekTarget        Msf            // Next seek command target
-	SeekTargetPending bool           // True if the seek is waiting to be executed
-	Position          Msf            // Read position
-	DoubleSpeed       bool           // If true, 150 sectors per second, else 75 sectors
-	RxSector          *XaSector      // RX buffer sector
-	RxActive          bool           // Whether the data RX buffer is active
-	RxIndex           uint16         // Index of the next RX sector byte
-	RxLen             uint16         // RX sector last byte index
-	RxOffset          uint16         // RX index offset
-	ReadWholeSector   bool           // Reads 0x924 bytes of the sector if true, 0x800 if false
-	Mixer             *Mixer         // CD-DA audio mixer (connected to the SPU)
+	Index              uint8      // Some registers can change depending on the index
+	HostParams         *FIFO      // FIFO storing the command arguments
+	HostResponse       *FIFO      // FIFO storing command responses
+	Command            *uint8     // Pending command number, can be nil
+	IrqFlags           uint8      // 5 bit interrupt flags, low 3 bits are a sub-CPU interrupt
+	IrqMask            uint8      // 5 bit interrupt mask
+	RxBuffer           [2352]byte // RX data buffer
+	Sector             *XaSector  // Disc image sector
+	RxActive           bool       // True when want to read sector data
+	SubCpu             *SubCpu    // The controllers' sub-CPU
+	RxIndex            uint16     // Index of the next RX sector byte
+	RxLen              uint16     // RX sector last byte index
+	ReadState          *ReadState // CD read state
+	ReadPending        bool       // True if a sector read needs to be notified
+	Disc               *Disc      // Currently loaded disc, can be nil
+	SeekTargetPending  bool       // True if a seek is waiting to be executed
+	SeekTarget         *Msf       // Next seek command target
+	Position           *Msf       // Current read position
+	DoubleSpeed        bool       // If true, 150 sectors per second, else 75 sectorss
+	XaAdpcmToSpu       bool       // If true, ADPCM samples are sent to the SPU
+	ReadWholeSector    bool       // Reads 0x924 bytes of the sector if true, 0x800 if false
+	SectorSizeOverride bool       // If true, overrides the regular sector size
+	CddaMode           bool       // Whether the CD-DA mode is enabled
+	Autopause          bool       // Whether to pause at the end of the track
+	ReportInterrupts   bool       // Whether to generate interrupts for each CD-DA sector
+	FilterEnabled      bool       // Whether the ADPCM filter is enabled
+	FilterFile         uint8      // Which file numbers should be processed (filter)
+	FilterChannel      uint8      // Which channel numbers should be processed (filter)
+	Mixer              *Mixer     // CD-DA audio mixer (connected to the SPU)
+	Rand               *CdRomRng  // Pseudo-random CD timings RNG
 }
 
-// Disc can be nil
+// Returns a new CdRom instance
 func NewCdRom(disc *Disc) *CdRom {
-	cdrom := &CdRom{
-		Params:          NewFIFO(),
-		Response:        NewFIFO(),
-		CmdState:        NewCommandState(),
-		ReadState:       NewReadState(),
+	return &CdRom{
+		HostParams:      NewFIFO(),
+		HostResponse:    NewFIFO(),
+		Sector:          NewXaSector(),
 		Disc:            disc,
+		SubCpu:          NewSubCpu(),
+		ReadState:       NewReadState(),
 		SeekTarget:      NewMsf(),
 		Position:        NewMsf(),
-		RxSector:        NewXaSector(),
 		ReadWholeSector: true,
 		Mixer:           NewMixer(),
-	}
-	cdrom.OnAcknowledge = cdrom.AckIdle
-	return cdrom
-}
-
-// Ejects the disc from the CD tray
-func (cdrom *CdRom) EjectDisc() {
-	cdrom.Disc = nil
-}
-
-// Insert a disc into the CD tray
-func (cdrom *CdRom) InsertDisc(disc *Disc) {
-	cdrom.Disc = disc
-}
-
-// Set the command state to RX pending
-func (cdrom *CdRom) RxPending(delay, irqDelay uint32, code IrqCode, response *FIFO) {
-	state := cdrom.CmdState
-	state.State = CMD_STATE_RXPENDING
-	state.RxPendingDelay = delay
-	state.RxPendingIrqDelay = irqDelay
-	state.RxPendingIrqCode = code
-	state.RxPendingFifo = response
-	// reset value of irqpending
-	state.IrqPendingIrqDelay = 0
-	state.IrqPendingIrqCode = 0
-}
-
-// Set the command state to IRQ pending
-func (cdrom *CdRom) IrqPending(delay uint32, code IrqCode) {
-	state := cdrom.CmdState
-	state.State = CMD_STATE_IRQ_PENDING
-	state.IrqPendingIrqDelay = delay
-	state.IrqPendingIrqCode = code
-	// reset value of rxpending
-	state.RxPendingDelay = 0
-	state.RxPendingIrqDelay = 0
-	state.RxPendingIrqCode = 0
-	state.RxPendingFifo = nil
-}
-
-// Set the state to idle
-func (cdrom *CdRom) IdleState() {
-	state := cdrom.CmdState
-	state.State = CMD_STATE_IDLE
-	state.IrqPendingIrqDelay = 0
-	state.IrqPendingIrqCode = 0
-	state.RxPendingDelay = 0
-	state.RxPendingIrqDelay = 0
-	state.RxPendingIrqCode = 0
-	state.RxPendingFifo = nil
-}
-
-// Returns the value of the status register
-func (cdrom *CdRom) Status() uint8 {
-	r := cdrom.Index
-
-	// https://problemkaputt.de/psx-spx.htm#cdromcontrollerioports
-	// TODO: XA-ADPCM fifo empty
-	r |= 0 << 2
-	r |= uint8(oneIfTrue(cdrom.Params.IsEmpty())) << 3
-	r |= uint8(oneIfTrue(!cdrom.Params.IsFull())) << 4
-	r |= uint8(oneIfTrue(!cdrom.Response.IsEmpty())) << 5
-
-	dataAvailable := cdrom.RxIndex < cdrom.RxLen
-	r |= uint8(oneIfTrue(dataAvailable)) << 6
-
-	// Command/parameter transmission busy
-	if cdrom.CmdState.State == CMD_STATE_RXPENDING {
-		r |= 1 << 7
-	}
-
-	return r
-}
-
-// Is in interrupt?
-func (cdrom *CdRom) Irq() bool {
-	return cdrom.IrqFlags&cdrom.IrqMask != 0
-}
-
-// Triggers an interrupt
-func (cdrom *CdRom) TriggerIrq(irq IrqCode, irqState *IrqState) {
-	if cdrom.IrqFlags != 0 {
-		panic("cdrom: nested interrupt") // TODO
-	}
-
-	prevIrq := cdrom.Irq()
-	cdrom.IrqFlags = uint8(irq)
-
-	if !prevIrq && cdrom.Irq() {
-		irqState.SetHigh(INTERRUPT_CDROM)
+		Rand:            NewCdRomRng(),
 	}
 }
 
-// Set index (some registers can change behaviour depending on it)
-func (cdrom *CdRom) SetIndex(index uint8) {
-	cdrom.Index = index & 3
-}
-
-// IRQ acknowledge
-func (cdrom *CdRom) AcknowledgeIrq(val uint8) {
-	cdrom.IrqFlags &= ^val
-
-	if cdrom.IrqFlags == 0 {
-		if !cdrom.CmdState.IsIdle() {
-			panic("cdrom: IRQ acknowledge while controller is busy")
-		}
-
-		onAck := cdrom.OnAcknowledge
-		cdrom.OnAcknowledge = cdrom.AckIdle
-		onAck()
-	}
-}
-
-// Set the IRQ mask
-func (cdrom *CdRom) SetIrqMask(val uint8) {
-	cdrom.IrqMask = val & 0x1f
-}
-
-// 0x01
-func (cdrom *CdRom) CommandGetStat() {
-	if !cdrom.Params.IsEmpty() {
-		// TODO
-		panic("cdrom: invalid parameters for GetStat")
-	}
-
-	response := NewFIFO()
-	response.Push(cdrom.DriveStatus())
-
-	var rxDelay uint32
-	if cdrom.Disc != nil {
-		rxDelay = 24000 // average delay with game disc
-	} else {
-		rxDelay = 17000 // average delay with tray open
-	}
-
-	cdrom.RxPending(rxDelay, rxDelay+5401, IRQ_CODE_OK, response)
-}
-
-// Return the drive status (many commands return it)
-func (cdrom *CdRom) DriveStatus() uint8 {
-	if cdrom.Disc != nil {
-		var r uint8
-		isReading := !cdrom.ReadState.IsIdle()
-
-		r |= 1 << 1 // motor on
-		r |= uint8(oneIfTrue(isReading)) << 5
-		return r
-	}
-	// no disc, pretend that tray is open
-	return 0x10
-}
-
-// 0x19
-func (cdrom *CdRom) CommandTest() {
-	if cdrom.Params.Length() != 1 {
-		panicFmt(
-			"cdrom: invalid number of parameters for Test (expected 1, got %d)",
-			cdrom.Params.Length(),
-		)
-	}
-
-	cmd := cdrom.Params.Pop()
-	switch cmd {
-	case 0x20:
-		cdrom.TestVersion()
-	default:
-		panicFmt("cdrom: unhandled Test command 0x%x", cmd)
-	}
-}
-
-// 0x20, called by CommandTest
-func (cdrom *CdRom) TestVersion() {
-	// values taken from Mednafen
-	response := NewFIFOFromBytes([]byte{
-		0x97,
-		0x01,
-		0x10,
-		0xc2,
-	})
-
-	var rxDelay uint32
-	if cdrom.Disc != nil {
-		rxDelay = 21000
-	} else {
-		rxDelay = 29000
-	}
-
-	cdrom.RxPending(rxDelay, rxDelay+9711, IRQ_CODE_OK, response)
-}
-
-// Push a value to the parameter FIFO
-func (cdrom *CdRom) PushParam(param uint8) {
-	if cdrom.Params.IsFull() {
-		panic("cdrom: attempted to push param to full FIFO")
-	}
-	cdrom.Params.Push(param)
-}
-
-// Execute command
-func (cdrom *CdRom) Command(cmd uint8, irqState *IrqState, th *TimeHandler) {
-	if !cdrom.CmdState.IsIdle() {
-		panic("cdrom: received command while controller is busy")
-	}
-
-	cdrom.Response.Clear()
-	fmt.Printf("cdrom: cdrom command 0x%x\n", cmd)
-
-	var handler CmdHandlerFunc
-	switch cmd {
-	case 0x01:
-		handler = cdrom.CommandGetStat
-	case 0x02:
-		handler = cdrom.CommandSetLoc
-	case 0x06:
-		handler = cdrom.CommandReadN
-	case 0x09:
-		handler = cdrom.CommandPause
-	case 0xa:
-		handler = cdrom.CommandInit
-	case 0x0e:
-		handler = cdrom.CommandSetMode
-	case 0x15:
-		handler = cdrom.CommandSeekL
-	case 0x1a:
-		handler = cdrom.CommandGetId
-	case 0x1e:
-		handler = cdrom.CommandReadToc
-	case 0x19:
-		handler = cdrom.CommandTest
-	case 0x0c:
-		handler = cdrom.CommandDemute
-	default:
-		panicFmt("cdrom: unhandled command 0x%x", cmd)
-	}
-
-	if cdrom.IrqFlags == 0 {
-		// we already acknowledged the previous command
-		handler()
-
-		if cdrom.CmdState.State == CMD_STATE_RXPENDING {
-			// schedule an interrupt
-			th.SetNextSyncDelta(PERIPHERAL_CDROM, uint64(cdrom.CmdState.RxPendingIrqDelay))
-		}
-	} else {
-		// execute this command after the current one is acknowledged
-		cdrom.OnAcknowledge = handler
-	}
-
-	if cdrom.ReadState.IsReading() {
-		th.SetNextSyncDeltaIfCloser(PERIPHERAL_CDROM, uint64(cdrom.ReadState.Delay))
-	}
-
-	cdrom.Params.Clear()
-}
-
-// Demute command (0x0c)
-func (cdrom *CdRom) CommandDemute() {
-	cdrom.RxPending(
-		32000,
-		32000+5401,
-		IRQ_CODE_OK,
-		NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
-	)
-}
-
-// 0xa
-func (cdrom *CdRom) CommandInit() {
-	cdrom.OnAcknowledge = cdrom.AckInit
-	cdrom.RxPending(
-		58000,
-		58000+5401,
-		IRQ_CODE_OK,
-		NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
-	)
-}
-
-// CommandInit acknowledge
-func (cdrom *CdRom) AckInit() {
-	cdrom.IdleState()
-	cdrom.DoubleSpeed = false
-	cdrom.ReadWholeSector = true
-	cdrom.Position = NewMsf()
-	cdrom.SeekTarget = NewMsf()
-
-	cdrom.RxPending(
-		2000000,
-		2000000+1870,
-		IRQ_CODE_DONE,
-		NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
-	)
-}
-
-// Read table of contents
-func (cdrom *CdRom) CommandReadToc() {
-	cdrom.OnAcknowledge = cdrom.AckReadToc
-
-	cdrom.RxPending(
-		45000,
-		45000+5401,
-		IRQ_CODE_OK,
-		NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
-	)
-}
-
-// ReadToc acknowledge
-func (cdrom *CdRom) AckReadToc() {
-	var rxDelay uint32
-	if cdrom.Disc != nil {
-		rxDelay = 16000000 // ~0.5 seconds
-	} else {
-		rxDelay = 11000
-	}
-
-	cdrom.ReadState.MakeIdle()
-
-	cdrom.RxPending(
-		rxDelay,
-		rxDelay+1859,
-		IRQ_CODE_DONE,
-		NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
-	)
-}
-
-// Read the CD-ROM's identification string
-func (cdrom *CdRom) CommandGetId() {
-	if cdrom.Disc != nil {
-		// respond with the status byte and then the disc identificator
-		cdrom.OnAcknowledge = cdrom.AckGetId
-
-		// send status byte
-		cdrom.RxPending(
-			26000,
-			26000+5401,
-			IRQ_CODE_OK,
-			NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
-		)
-	} else {
-		// pretend that the disc tray is open
-		cdrom.RxPending(
-			20000,
-			20000+6776,
-			IRQ_CODE_ERROR,
-			NewFIFOFromBytes([]byte{0x11, 0x80}),
-		)
-	}
-}
-
-// GetId acknowledge
-func (cdrom *CdRom) AckGetId() {
-	disc := cdrom.GetDiscOrPanic()
-
-	var regionByte byte
-	switch disc.Region {
-	case REGION_JAPAN:
-		regionByte = 'I'
-	case REGION_NORTH_AMERICA:
-		regionByte = 'A'
-	case REGION_EUROPE:
-		regionByte = 'E'
-	}
-
-	response := NewFIFOFromBytes([]byte{
-		cdrom.DriveStatus(),       // status
-		0x00,                      // licensed, not audio
-		0x20,                      // disc type
-		0x00,                      // session info exists
-		'S', 'C', 'E', regionByte, // region string
-	})
-
-	cdrom.RxPending(7336, 7336+12376, IRQ_CODE_DONE, response)
-}
-
-// Execute seek
-func (cdrom *CdRom) DoSeek() {
-	// make sure we're not on track 1's pregap
-	if cdrom.SeekTarget.ToU32() < MsfFromBcd(0x00, 0x02, 0x00).ToU32() {
-		panicFmt("cdrom: seek to track 1's pregap %s", cdrom.SeekTarget)
-	}
-
-	cdrom.Position = cdrom.SeekTarget
-	cdrom.SeekTargetPending = false
-}
-
-// Execute seek command
-func (cdrom *CdRom) CommandSeekL() {
-	cdrom.DoSeek()
-	cdrom.OnAcknowledge = cdrom.AckSeekL
-
-	cdrom.RxPending(
-		35000,
-		35000+5401,
-		IRQ_CODE_OK,
-		NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
-	)
-}
-
-// SeekL acknowledge
-func (cdrom *CdRom) AckSeekL() {
-	// FIXME: we should measure how much time it would take
-	//        for the drive to physically move the head
-
-	cdrom.RxPending(
-		1000000,
-		1000000+1859,
-		IRQ_CODE_DONE,
-		NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
-	)
-}
-
-func (cdrom *CdRom) CommandSetMode() {
-	paramsLen := cdrom.Params.Length()
-	if paramsLen != 1 {
-		// FIXME: should trigger IRQ code 5 and respond with 0x13, 0x20
-		panicFmt(
-			"cdrom: invalid number of parameters for SetMode (expected 1, got %d)",
-			paramsLen,
-		)
-	}
-
-	mode := cdrom.Params.Pop()
-	cdrom.DoubleSpeed = (mode & 0x80) != 0
-	cdrom.ReadWholeSector = (mode & 0x20) != 0
-
-	if mode&0x5f != 0 {
-		panicFmt("cdrom: unhandled mode 0x%x", mode)
-	}
-
-	cdrom.RxPending(
-		22000,
-		22000+5391,
-		IRQ_CODE_OK,
-		NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
-	)
-}
-
-func (cdrom *CdRom) CommandPause() {
-	if cdrom.ReadState.IsIdle() {
-		fmt.Println("cdrom: call to Pause when not reading")
-	}
-
-	cdrom.OnAcknowledge = cdrom.AckPause
-
-	cdrom.RxPending(
-		25000,
-		25000+5393,
-		IRQ_CODE_OK,
-		NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
-	)
-}
-
-func (cdrom *CdRom) AckPause() {
-	cdrom.ReadState.MakeIdle()
-
-	cdrom.RxPending(
-		2000000,
-		2000000+1858,
-		IRQ_CODE_DONE,
-		NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
-	)
-}
-
-// Start reading
-func (cdrom *CdRom) CommandReadN() {
-	if !cdrom.ReadState.IsIdle() {
-		panic("cdrom: ReadN call while reading")
-	}
-
-	if cdrom.SeekTargetPending {
-		cdrom.DoSeek() // FIXME: this does not happen instantly
-	}
-
-	readDelay := cdrom.CyclesPerSector()
-	cdrom.ReadState.MakeReading(readDelay)
-
-	cdrom.RxPending(
-		28000,
-		28000+5401,
-		IRQ_CODE_OK,
-		NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
-	)
-}
-
-// Save where the next seek should be, but don't seek yet
-func (cdrom *CdRom) CommandSetLoc() {
-	paramsLen := cdrom.Params.Length()
-	if paramsLen != 3 {
-		// FIXME: should trigger IRQ 5 and respond with 0x13, 0x20
-		panicFmt(
-			"cdrom: unexpected amount of parameters for SetLoc (got %d, expected 3)",
-			paramsLen,
-		)
-	}
-
-	m := cdrom.Params.Pop()
-	s := cdrom.Params.Pop()
-	f := cdrom.Params.Pop()
-	cdrom.SeekTarget = MsfFromBcd(m, s, f)
-	cdrom.SeekTargetPending = true
-
-	if cdrom.Disc != nil {
-		cdrom.RxPending(
-			35000,
-			35000+5399,
-			IRQ_CODE_OK,
-			NewFIFOFromBytes([]byte{cdrom.DriveStatus()}),
-		)
-	} else {
-		cdrom.RxPending(
-			25000,
-			25000+6763,
-			IRQ_CODE_ERROR,
-			NewFIFOFromBytes([]byte{0x11, 0x80}),
-		)
-	}
-}
-
-func (cdrom *CdRom) Load(th *TimeHandler, irqState *IrqState, size AccessSize, offset uint32) uint8 {
+func (cdrom *CdRom) Load(offset uint32,
+	size AccessSize,
+	th *TimeHandler,
+	irqState *IrqState,
+) uint32 {
 	cdrom.Sync(th, irqState)
 
 	if size != ACCESS_BYTE {
-		panicFmt("cdrom: tried to load %d bytes (expected %d)", size, ACCESS_BYTE)
+		panicFmt("cdrom: tried to load %d bytes (expected 1)", size)
 	}
 
 	index := cdrom.Index
 
 	switch offset {
 	case 0:
-		return cdrom.Status()
-	case 1:
-		if cdrom.Response.IsEmpty() {
-			fmt.Println("cdrom: response FIFO is empty!")
+		return uint32(cdrom.HostStatus())
+	case 1: // RESULT register
+		if cdrom.HostResponse.IsEmpty() {
+			fmt.Println("cdrom: RESULT register read with empty response FIFO")
 		}
-		return cdrom.Response.Pop()
+		fmt.Println("RESULT read")
+		return uint32(cdrom.HostResponse.Pop())
 	case 3:
 		switch index {
 		case 0:
-			return cdrom.IrqMask | 0xe0
+			return uint32(cdrom.IrqMask | 0xe0)
 		case 1:
-			return cdrom.IrqFlags | 0xe0
+			return uint32(cdrom.IrqFlags | 0xe0)
 		default:
 			panic("cdrom: not implemented")
 		}
@@ -677,19 +99,18 @@ func (cdrom *CdRom) Store(
 	cdrom.Sync(th, irqState)
 
 	if size != ACCESS_BYTE {
-		panicFmt("cdrom: tried to store %d bytes (expected %d)", size, ACCESS_BYTE)
+		panicFmt("cdrom: tried to store %d bytes (expected 1)", size)
 	}
-
 	index := cdrom.Index
 
 	switch offset {
-	case 0:
-		cdrom.SetIndex(val)
+	case 0: // ADDRESS register
+		cdrom.Index = val & 3
 	case 1:
 		switch index {
 		case 0:
-			cdrom.Command(val, irqState, th)
-		case 3:
+			cdrom.SetCommand(val, th)
+		case 3: // ATV2 register
 			cdrom.Mixer.CdRightToSpuRight = val
 		default:
 			panic("cdrom: not implemented")
@@ -697,11 +118,12 @@ func (cdrom *CdRom) Store(
 	case 2:
 		switch index {
 		case 0:
-			cdrom.PushParam(val)
+			cdrom.SetParameter(val)
 		case 1:
-			cdrom.SetIrqMask(val)
-		case 2:
+			cdrom.SetHostInterruptMask(val)
+		case 2: // ATV0 register
 			cdrom.Mixer.CdLeftToSpuLeft = val
+		case 3: // ATV3 register
 			cdrom.Mixer.CdRightToSpuLeft = val
 		default:
 			panic("cdrom: not implemented")
@@ -709,16 +131,10 @@ func (cdrom *CdRom) Store(
 	case 3:
 		switch index {
 		case 0:
-			cdrom.Config(val)
+			cdrom.SetHostChipControl(val)
 		case 1:
-			cdrom.AcknowledgeIrq(val & 0x1f)
-			if val&0x40 != 0 {
-				cdrom.Params.Clear()
-			}
-			if val&0xa0 != 0 {
-				panic("cdrom: not implemented")
-			}
-		case 2:
+			cdrom.HostClipClearControl(val, th)
+		case 2: // ATV1 register
 			cdrom.Mixer.CdLeftToSpuRight = val
 		case 3:
 			fmt.Printf("cdrom: mixer apply 0x%x\n", val)
@@ -732,115 +148,84 @@ func (cdrom *CdRom) Store(
 
 func (cdrom *CdRom) Sync(th *TimeHandler, irqState *IrqState) {
 	delta := th.Sync(PERIPHERAL_CDROM)
+	remainingCycles := uint32(delta)
+	subcpu := cdrom.SubCpu
 
-	// handle command
-	switch cdrom.CmdState.State {
-	case CMD_STATE_IDLE:
-		cdrom.HandleIdleState(th)
-	case CMD_STATE_RXPENDING:
-		cdrom.HandleRxPendingState(th, irqState, delta)
-	case CMD_STATE_IRQ_PENDING:
-		cdrom.HandleIrqPendingState(th, irqState, delta)
-	}
-
-	// check if we have a read pending
-	if cdrom.ReadState.IsReading() {
-		delay := cdrom.ReadState.Delay
-		var nextSync uint32
-
-		if uint64(delay) > delta {
-			nextSync = delay - uint32(delta)
+	for remainingCycles > 0 {
+		var elapsed uint32
+		if subcpu.IsInCommand() {
+			if subcpu.Timer > remainingCycles {
+				subcpu.Timer -= remainingCycles
+				elapsed = remainingCycles
+			} else {
+				stepRemaining := subcpu.Timer
+				cdrom.NextSubCpuStep(irqState)
+				elapsed = stepRemaining
+			}
 		} else {
-			cdrom.SectorRead(irqState)
-			// prepare for next sector
-			nextSync = cdrom.CyclesPerSector()
+			// no command pending
+			elapsed = remainingCycles
 		}
-		cdrom.ReadState.MakeReading(nextSync)
 
-		th.SetNextSyncDeltaIfCloser(PERIPHERAL_CDROM, uint64(nextSync))
-	}
-}
+		// commands can cause async responses, process async events
+		if subcpu.AsyncResponse.IsReady() {
+			delay := subcpu.AsyncResponse.Delay
 
-// Amount of CPU cycles required to read a single
-func (cdrom *CdRom) CyclesPerSector() uint32 {
-	cycles := CPU_FREQ_HZ / 75
-	return cycles >> oneIfTrue(cdrom.DoubleSpeed)
-}
-
-func (cdrom *CdRom) HandleIrqPendingState(th *TimeHandler, irqState *IrqState, delta uint64) {
-	state := cdrom.CmdState
-	irqDelay := state.IrqPendingIrqDelay
-	irqCode := state.IrqPendingIrqCode
-
-	if uint64(irqDelay) > delta {
-		// didn't reach the interrupt yet
-		newIrqDelay := irqDelay - uint32(delta)
-
-		th.SetNextSyncDelta(PERIPHERAL_CDROM, uint64(irqDelay))
-		cdrom.IrqPending(newIrqDelay, irqCode)
-	} else {
-		// reached interrupt
-		cdrom.TriggerIrq(irqCode, irqState)
-		th.RemoveNextSync(PERIPHERAL_CDROM)
-		cdrom.IdleState()
-	}
-}
-
-func (cdrom *CdRom) HandleRxPendingState(th *TimeHandler, irqState *IrqState, delta uint64) {
-	state := cdrom.CmdState
-	rxDelay := state.RxPendingDelay
-	irqDelay := state.RxPendingIrqDelay
-	irqCode := state.RxPendingIrqCode
-	response := state.RxPendingFifo
-
-	if uint64(rxDelay) > delta {
-		// update counters
-		rxDelay -= uint32(delta)
-		irqDelay -= uint32(delta)
-
-		th.SetNextSyncDelta(PERIPHERAL_CDROM, uint64(rxDelay))
-		cdrom.RxPending(rxDelay, irqDelay, irqCode, response)
-	} else {
-		// end of transfer
-		cdrom.Response = response
-
-		if uint64(irqDelay) > delta {
-			// schedule an interrupt
-			newIrqDelay := irqDelay - uint32(delta)
-			th.SetNextSyncDelta(PERIPHERAL_CDROM, uint64(newIrqDelay))
-			cdrom.IrqPending(newIrqDelay, irqCode)
-		} else {
-			// irq reached
-			cdrom.TriggerIrq(irqCode, irqState)
-			th.RemoveNextSync(PERIPHERAL_CDROM)
-			cdrom.IdleState()
+			if delay > elapsed {
+				subcpu.AsyncResponse.Delay -= elapsed
+			} else {
+				// process async response
+				subcpu.AsyncResponse.Delay = 0
+				cdrom.MaybeProcessAsyncResponse(th)
+			}
 		}
+
+		// handle sector reads
+		if cdrom.ReadState.IsReading() {
+			delay := cdrom.ReadState.Delay
+
+			if delay > elapsed {
+				cdrom.ReadState.Delay -= elapsed
+			} else {
+				leftover := elapsed - delay
+
+				// read sector
+				cdrom.ReadSector()
+				cdrom.MaybeNotifyRead(th)
+
+				// set next sector read delay
+				cdrom.ReadState.Delay = cdrom.CyclesPerSector() - leftover
+			}
+		}
+
+		remainingCycles -= elapsed
 	}
+
+	cdrom.PredictNextSync(th)
 }
 
-func (cdrom *CdRom) HandleIdleState(th *TimeHandler) {
+func (cdrom *CdRom) PredictNextSync(th *TimeHandler) {
 	th.RemoveNextSync(PERIPHERAL_CDROM)
-	cdrom.IdleState()
-}
 
-// Read a byte from the RX buffer
-func (cdrom *CdRom) GetByte() byte {
-	if cdrom.RxIndex >= cdrom.RxLen {
-		panic("cdrom: RX read reached 0x800")
+	if cdrom.SubCpu.IsInCommand() {
+		// sync at the next sub-CPU step
+		delta := uint64(cdrom.SubCpu.Timer)
+		th.SetNextSyncDelta(PERIPHERAL_CDROM, delta)
+	} else if cdrom.IrqFlags == 0 {
+		// sync at the next async response
+
+		if cdrom.SubCpu.AsyncResponse.IsReady() {
+			delta := uint64(cdrom.SubCpu.AsyncResponse.Delay)
+			th.SetNextSyncDelta(PERIPHERAL_CDROM, delta)
+		}
 	}
 
-	idx := cdrom.RxOffset + cdrom.RxIndex
-	v := cdrom.RxSector.DataByte(idx)
-
-	if cdrom.RxActive {
-		cdrom.RxIndex++
-	} else {
-		panic("cdrom: ReadByte() while not active")
+	if cdrom.ReadState.IsReading() {
+		th.MaybeSetNextSyncDelta(PERIPHERAL_CDROM, uint64(cdrom.ReadState.Delay))
 	}
-
-	return v
 }
 
+// Read a word from the RX buffer
 func (cdrom *CdRom) DmaReadWord() uint32 {
 	b0 := uint32(cdrom.GetByte())
 	b1 := uint32(cdrom.GetByte())
@@ -849,62 +234,654 @@ func (cdrom *CdRom) DmaReadWord() uint32 {
 	return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
 }
 
+// HSTS register read
+func (cdrom *CdRom) HostStatus() uint8 {
+	r := cdrom.Index
+
+	// TODO: ADPCM busy
+	r |= 0 << 2
+	r |= uint8(oneIfTrue(cdrom.HostParams.IsEmpty())) << 3    // PRMEMPT
+	r |= uint8(oneIfTrue(!cdrom.HostParams.IsFull())) << 4    // PRMWRDY
+	r |= uint8(oneIfTrue(!cdrom.HostResponse.IsEmpty())) << 5 // RSLRRDY
+	r |= uint8(oneIfTrue(cdrom.RxIndex < cdrom.RxLen)) << 6   // DRQSTS
+	r |= uint8(oneIfTrue(cdrom.SubCpu.IsBusy())) << 7         // BUSYSTS
+	return r
+}
+
+// COMMAND register write
+func (cdrom *CdRom) SetCommand(val uint8, th *TimeHandler) {
+	if cdrom.Command != nil {
+		panic("cdrom: nested command")
+	}
+
+	v := val
+	cdrom.Command = &v
+	cdrom.MaybeStartCommand(th)
+}
+
+// PARAMETER register write
+func (cdrom *CdRom) SetParameter(val uint8) {
+	if cdrom.Command != nil {
+		panic("cdrom: attempted to push parameter while in command")
+	}
+	if cdrom.HostParams.IsFull() {
+		// FIXME: this should wrap around the parameter FIFO
+		panic("cdrom: parameter FIFO overflow")
+	}
+
+	cdrom.HostParams.Push(val)
+}
+
+// HINTMSK register write
+func (cdrom *CdRom) SetHostInterruptMask(val uint8) {
+	if val&0x18 != 0 {
+		fmt.Printf("cdrom: unhandled HINTMSK mask 0x%x\n", val)
+	}
+
+	cdrom.IrqMask = val & 0x1f
+}
+
+// HCLRCTL register write
+func (cdrom *CdRom) HostClipClearControl(val uint8, th *TimeHandler) {
+	cdrom.IrqAck(val&0x1f, th)
+
+	if val&0x40 != 0 {
+		cdrom.HostParams.Clear()
+	}
+	if val&0xa0 != 0 {
+		panicFmt("cdrom: unhandled HCLRCTL: 0x%x", val)
+	}
+}
+
+// HCHPCTL register write
+func (cdrom *CdRom) SetHostChipControl(val uint8) {
+	prevActive := cdrom.RxActive
+	cdrom.RxActive = val&0x80 != 0
+
+	if cdrom.RxActive {
+		if !prevActive {
+			cdrom.RxIndex = 0
+		}
+	} else {
+		// TODO: check if this is correct
+		idx := cdrom.RxIndex
+		adjust := (idx & 4) << 1
+		cdrom.RxIndex = uint16(int32(idx) & ^7) + adjust
+	}
+
+	if val&0x7f != 0 {
+		panicFmt("cdrom: unhandled HCHPCTL 0x%x", val)
+	}
+}
+
+func (cdrom *CdRom) IrqAck(v uint8, th *TimeHandler) {
+	cdrom.IrqFlags &= ^v
+
+	cdrom.MaybeStartCommand(th)
+	cdrom.MaybeProcessAsyncResponse(th)
+	cdrom.MaybeNotifyRead(th)
+}
+
+func (cdrom *CdRom) MaybeStartCommand(th *TimeHandler) {
+	subcpu := cdrom.SubCpu
+	if cdrom.Command != nil && cdrom.IrqFlags == 0 && !subcpu.IsInCommand() {
+		// emulate the random pending command delay
+		delay := TIMING_COMMAND_PENDING +
+			(cdrom.Rand.Next() % TIMING_COMMAND_PENDING_VARIATION)
+
+		subcpu.StartCommand(delay)
+		cdrom.PredictNextSync(th)
+	}
+}
+
+func (cdrom *CdRom) MaybeProcessAsyncResponse(th *TimeHandler) {
+	subcpu := cdrom.SubCpu
+	if subcpu.AsyncResponse.IsReady() && cdrom.IrqFlags == 0 && !subcpu.IsInCommand() {
+		// run response sequcne
+		handler := subcpu.AsyncResponse.Handler
+		subcpu.AsyncResponse.Reset()
+		subcpu.Response.Clear()
+
+		subcpu.IrqCode = IRQ_CODE_DONE
+		rxDelay := handler()
+
+		subcpu.Sequence = SUBCPU_ASYNCRXPUSH
+		subcpu.Timer = rxDelay
+
+		cdrom.PredictNextSync(th)
+	}
+}
+
+func (cdrom *CdRom) MaybeNotifyRead(th *TimeHandler) {
+	subcpu := cdrom.SubCpu
+	if cdrom.ReadPending && cdrom.IrqFlags == 0 && !subcpu.IsInCommand() {
+		subcpu.Response.Clear()
+		subcpu.IrqCode = IRQ_CODE_SECTOR_READY
+
+		cdrom.PushStatus()
+		subcpu.Sequence = SUBCPU_ASYNCRXPUSH
+		subcpu.Timer = TIMING_READ_RX_PUSH
+
+		cdrom.ReadPending = false
+		cdrom.PredictNextSync(th)
+	}
+}
+
+// Processes the next sub-CPU step
+func (cdrom *CdRom) NextSubCpuStep(irqState *IrqState) {
+	subcpu := cdrom.SubCpu
+
+	switch subcpu.Sequence {
+	case SUBCPU_IDLE:
+		panic("cdrom: idle sub-CPU sequence")
+	case SUBCPU_COMMANDPENDING, SUBCPU_PARAMPUSH:
+		cdrom.HandleSubCpuCommandTransfer(subcpu)
+	case SUBCPU_EXECUTION:
+		cdrom.HandleSubCpuCommandExecution(subcpu)
+	case SUBCPU_RXFLUSH, SUBCPU_RXPUSH:
+		cdrom.HandleSubCpuRx(subcpu)
+	case SUBCPU_BUSYDELAY:
+		cdrom.HandleSubCpuBusyDelay(subcpu)
+	case SUBCPU_IRQDELAY:
+		cdrom.HandleSubCpuIrqDelay(subcpu, irqState)
+	case SUBCPU_ASYNCRXPUSH:
+		cdrom.HandleSubCpuAsyncRxPush(subcpu)
+	}
+}
+
+// SUBCPU_ASYNCRXPUSH
+func (cdrom *CdRom) HandleSubCpuAsyncRxPush(subcpu *SubCpu) {
+	b := subcpu.Response.Pop()
+	cdrom.HostResponse.Push(b)
+	fmt.Println("push")
+
+	if subcpu.Response.IsEmpty() {
+		subcpu.Timer = TIMING_IRQ_DELAY
+		subcpu.Sequence = SUBCPU_IRQDELAY
+	} else {
+		subcpu.Timer = TIMING_RXPUSH
+		subcpu.Sequence = SUBCPU_ASYNCRXPUSH
+	}
+}
+
+// SUBCPU_IRQDELAY
+func (cdrom *CdRom) HandleSubCpuIrqDelay(subcpu *SubCpu, irqState *IrqState) {
+	cdrom.Command = nil
+	cdrom.TriggerIrq(subcpu.IrqCode, irqState)
+	subcpu.Sequence = SUBCPU_IDLE
+}
+
+// SUBCPU_BUSYDELAY
+func (cdrom *CdRom) HandleSubCpuBusyDelay(subcpu *SubCpu) {
+	cdrom.SubCpu.Timer = TIMING_IRQ_DELAY
+	cdrom.SubCpu.Sequence = SUBCPU_IRQDELAY
+}
+
+// SUBCPU_RXFLUSH, SUBCPU_RXPUSH
+func (cdrom *CdRom) HandleSubCpuRx(subcpu *SubCpu) {
+	b := subcpu.Response.Pop()
+	cdrom.HostResponse.Push(b)
+	fmt.Println("push")
+
+	if subcpu.Response.IsEmpty() {
+		subcpu.Timer = TIMING_BUSY_DELAY
+		subcpu.Sequence = SUBCPU_BUSYDELAY
+	} else {
+		subcpu.Timer = TIMING_RXPUSH
+		subcpu.Sequence = SUBCPU_RXPUSH
+	}
+}
+
+// SUBCPU_EXECUTION
+func (cdrom *CdRom) HandleSubCpuCommandExecution(subcpu *SubCpu) {
+	cdrom.HostResponse.Clear()
+	subcpu.Timer = TIMING_RXFLUSH
+	subcpu.Sequence = SUBCPU_RXFLUSH
+}
+
+// SUBCPU_COMMANDPENDING, SUBCPU_PARAMPUSH
+func (cdrom *CdRom) HandleSubCpuCommandTransfer(subcpu *SubCpu) {
+	if cdrom.HostParams.IsEmpty() {
+		// all params are recieved, run the command
+		cdrom.ExecuteCommand()
+
+		subcpu.Timer = TIMING_EXECUTION
+		subcpu.Sequence = SUBCPU_EXECUTION
+	} else {
+		// send next parameter
+		param := cdrom.HostParams.Pop()
+		subcpu.Params.Push(param)
+
+		subcpu.Timer = TIMING_PARAM_PUSH
+		subcpu.Sequence = SUBCPU_PARAMPUSH
+	}
+}
+
+// Triggers an interrupt
+func (cdrom *CdRom) TriggerIrq(irq IrqCode, irqState *IrqState) {
+	if cdrom.IrqFlags != 0 {
+		panic("cdrom: nested interrupt")
+	}
+
+	cdrom.IrqFlags = uint8(irq)
+
+	if cdrom.Irq() {
+		// rising edge interrupt
+		irqState.SetHigh(INTERRUPT_CDROM)
+	}
+}
+
+// Returns true if the controller is in an interrupt
+func (cdrom *CdRom) Irq() bool {
+	return cdrom.IrqFlags&cdrom.IrqMask != 0
+}
+
+// Read a byte from the RX buffer
+func (cdrom *CdRom) GetByte() byte {
+	b := cdrom.RxBuffer[cdrom.RxIndex]
+
+	if cdrom.RxActive {
+		cdrom.RxIndex++
+
+		if cdrom.RxIndex >= cdrom.RxLen {
+			// end of transfer, set RxActive to false
+			cdrom.RxActive = false
+		}
+	} else {
+		panic("cdrom: ReadByte() while RxActive is false")
+	}
+
+	return b
+}
+
+// Reads the current sector
+func (cdrom *CdRom) ReadSector() {
+	if cdrom.ReadPending {
+		panic("cdrom: attempted to read sector while another read is pending")
+	}
+
+	position := cdrom.Position
+	disc := cdrom.Disc
+	if disc == nil {
+		panic("cdrom: attempted to read sector without a disc")
+	}
+
+	sector, err := disc.ReadSector(position)
+	if err != nil {
+		panicFmt("cdrom: couldn't read sector: %s", err)
+	}
+
+	var data []byte
+	if cdrom.ReadWholeSector {
+		data = sector.DataNoSyncPattern() // skip sync pattern
+	} else {
+		// only read data after the XA subheader
+		data, err = sector.Mode2XaPayload()
+		if err != nil {
+			panicFmt("cdrom: couldn't get mode 2 payload: %s", err)
+		}
+		if len(data) > 2048 {
+			// mode 2 form 2 sector, should only be read with ReadWholeSector?
+			fmt.Println("cdrom: partial mode 2 form 2 sector read")
+			data = data[0:2048]
+		}
+	}
+
+	// copy data into the RX buffer
+	copy(cdrom.RxBuffer[:], data)
+
+	// go to the next position
+	next, err := cdrom.Position.Next()
+	if err != nil {
+		panicFmt("cdrom: msf: %s", err)
+	}
+	cdrom.Position = next
+	cdrom.ReadPending = true
+}
+
+// Runs the command in `cdrom.Command`
+func (cdrom *CdRom) ExecuteCommand() {
+	if cdrom.Command == nil {
+		panic("cdrom: tried to execute command while `cdrom.Command` is nil")
+	}
+
+	var minParam, maxParam uint8
+	var handler func()
+	cmd := *cdrom.Command
+
+	switch cmd {
+	case 0x01:
+		minParam, maxParam, handler = 0, 0, cdrom.CommandGetStat
+	case 0x02:
+		minParam, maxParam, handler = 3, 3, cdrom.CommandSetLoc
+	case 0x06:
+		minParam, maxParam, handler = 0, 0, cdrom.CommandRead
+	case 0x09:
+		minParam, maxParam, handler = 0, 0, cdrom.CommandPause
+	case 0x0a:
+		minParam, maxParam, handler = 0, 0, cdrom.CommandInit
+	case 0x0b:
+		minParam, maxParam, handler = 0, 0, cdrom.CommandMute
+	case 0x0c:
+		minParam, maxParam, handler = 0, 0, cdrom.CommandDemute
+	case 0x0d:
+		minParam, maxParam, handler = 2, 2, cdrom.CommandSetFilter
+	case 0x0e:
+		minParam, maxParam, handler = 1, 1, cdrom.CommandSetMode
+	case 0x0f:
+		minParam, maxParam, handler = 0, 0, cdrom.CommandGetParam
+	case 0x11:
+		minParam, maxParam, handler = 0, 0, cdrom.CommandGetLocP
+	case 0x15:
+		minParam, maxParam, handler = 0, 0, cdrom.CommandSeekL
+	case 0x19:
+		minParam, maxParam, handler = 1, 1, cdrom.CommandTest
+	case 0x1a:
+		minParam, maxParam, handler = 0, 0, cdrom.CommandGetId
+	case 0x1b:
+		minParam, maxParam, handler = 0, 0, cdrom.CommandRead
+	case 0x1e:
+		minParam, maxParam, handler = 0, 0, cdrom.CommandReadToc
+	default:
+		panicFmt("cdrom: unhandled command 0x%x", cmd)
+	}
+
+	paramsLen := cdrom.SubCpu.Params.Length()
+	if paramsLen < minParam || paramsLen > maxParam {
+		panicFmt(
+			"cdrom: unexpected amount of params for 0x%x (expected %d-%d params, got %d)",
+			cmd, minParam, maxParam, paramsLen,
+		)
+	}
+
+	handler()
+}
+
+// Get status byte
+func (cdrom *CdRom) CommandGetStat() {
+	cdrom.PushStatus()
+}
+
+func (cdrom *CdRom) CommandSetLoc() {
+	m := cdrom.SubCpu.Params.Pop()
+	s := cdrom.SubCpu.Params.Pop()
+	f := cdrom.SubCpu.Params.Pop()
+
+	cdrom.SeekTarget = MsfFromBcd(m, s, f)
+	cdrom.SeekTargetPending = true
+	cdrom.PushStatus()
+}
+
+// Start read sequence
+func (cdrom *CdRom) CommandRead() {
+	if cdrom.ReadState.IsReading() {
+		fmt.Println("cdrom: read while already reading")
+	}
+	if cdrom.SeekTargetPending {
+		cdrom.DoSeek()
+	}
+
+	readDelay := cdrom.CyclesPerSector()
+	cdrom.ReadState.MakeReading(readDelay)
+	cdrom.PushStatus()
+}
+
+// Stop reading sectors
+func (cdrom *CdRom) CommandPause() {
+	var asyncDelay uint32
+	if cdrom.ReadState.IsIdle() {
+		fmt.Println("cdrom: pause when not reading")
+		asyncDelay = 9000
+	} else {
+		asyncDelay = 1000000
+	}
+
+	cdrom.ReadState.MakeIdle() // TODO: is this right?
+	cdrom.SubCpu.ScheduleAsyncResponse(cdrom.AsyncPause, asyncDelay)
+	cdrom.PushStatus()
+}
+
+func (cdrom *CdRom) AsyncPause() uint32 {
+	cdrom.PushStatus()
+	return TIMING_PAUSE_RX_PUSH
+}
+
+// Initialize the CD-ROM controller
+func (cdrom *CdRom) CommandInit() {
+	cdrom.ReadState.MakeIdle()
+	cdrom.ReadPending = false
+
+	cdrom.SubCpu.ScheduleAsyncResponse(cdrom.AsyncInit, TIMING_INIT)
+	cdrom.PushStatus()
+}
+
+// CommandInit response
+func (cdrom *CdRom) AsyncInit() uint32 {
+	cdrom.Position = NewMsf()
+	cdrom.SeekTarget = NewMsf()
+	cdrom.ReadState.MakeIdle()
+	cdrom.DoubleSpeed = false
+	cdrom.XaAdpcmToSpu = false
+	cdrom.ReadWholeSector = false
+	cdrom.SectorSizeOverride = false
+	cdrom.FilterEnabled = false
+	cdrom.ReportInterrupts = false
+	cdrom.Autopause = false
+	cdrom.CddaMode = false
+
+	cdrom.PushStatus()
+	return TIMING_INIT_RX_PUSH
+}
+
+// Mute audio playback
+func (cdrom *CdRom) CommandMute() {
+	cdrom.PushStatus()
+}
+
+// Demute audio playback
+func (cdrom *CdRom) CommandDemute() {
+	cdrom.PushStatus()
+}
+
+// Set ADPCM filters
+func (cdrom *CdRom) CommandSetFilter() {
+	cdrom.FilterFile = cdrom.SubCpu.Params.Pop()
+	cdrom.FilterChannel = cdrom.SubCpu.Params.Pop()
+	cdrom.PushStatus()
+}
+
+// Set CD-ROM controller parameters
+func (cdrom *CdRom) CommandSetMode() {
+	mode := cdrom.SubCpu.Params.Pop()
+
+	cdrom.CddaMode = (mode>>0)&1 != 0
+	cdrom.Autopause = (mode>>1)&1 != 0
+	cdrom.ReportInterrupts = (mode>>2)&1 != 0
+	cdrom.FilterEnabled = (mode>>3)&1 != 0
+	cdrom.SectorSizeOverride = (mode>>4)&1 != 0
+	cdrom.ReadWholeSector = (mode>>5)&1 != 0
+	cdrom.XaAdpcmToSpu = (mode>>6)&1 != 0
+	cdrom.DoubleSpeed = (mode>>7)&1 != 0
+
+	if cdrom.CddaMode ||
+		cdrom.Autopause ||
+		cdrom.ReportInterrupts ||
+		cdrom.SectorSizeOverride {
+		panicFmt("cdrom: unhandled mode 0x%x", mode)
+	}
+
+	cdrom.PushStatus()
+}
+
+// Responds with CD-ROM controller parameters
+func (cdrom *CdRom) CommandGetParam() {
+	var mode uint8
+
+	mode |= uint8(oneIfTrue(cdrom.CddaMode)) << 0
+	mode |= uint8(oneIfTrue(cdrom.Autopause)) << 1
+	mode |= uint8(oneIfTrue(cdrom.ReportInterrupts)) << 2
+	mode |= uint8(oneIfTrue(cdrom.FilterEnabled)) << 3
+	mode |= uint8(oneIfTrue(cdrom.SectorSizeOverride)) << 4
+	mode |= uint8(oneIfTrue(cdrom.ReadWholeSector)) << 5
+	mode |= uint8(oneIfTrue(cdrom.XaAdpcmToSpu)) << 6
+	mode |= uint8(oneIfTrue(cdrom.DoubleSpeed)) << 7
+
+	cdrom.SubCpu.Response.PushSlice([]byte{
+		cdrom.DriveStatus(),
+		0, // always 0
+		cdrom.FilterFile,
+		cdrom.FilterChannel,
+	})
+}
+
+// Get current drive head position
+func (cdrom *CdRom) CommandGetLocP() {
+	if cdrom.Position.ToU32() < MsfFromBcd(0x00, 0x02, 0x00).ToU32() {
+		panic("cdrom: GetLocP in track 1's pregap")
+	}
+	panic("cdrom: GetLocP is not implemented") // TODO
+}
+
+// Seek command, the target position is set by the previous SetLoc command
+func (cdrom *CdRom) CommandSeekL() {
+	// initial := cdrom.Position.ToU32()
+	// target := cdrom.SeekTarget.ToU32()
+
+	cdrom.DoSeek()
+	cdrom.PushStatus()
+
+	cdrom.SubCpu.ScheduleAsyncResponse(cdrom.AsyncSeekL, 1000000)
+	/*
+		cdrom.SubCpu.ScheduleAsyncResponse(
+			cdrom.AsyncSeekL,
+			cdrom.CalcSeekTime(initial, target, true, false),
+		)
+	*/
+}
+
+// SeekL async response
+func (cdrom *CdRom) AsyncSeekL() uint32 {
+	cdrom.PushStatus()
+	return TIMING_SEEKL_RX_PUSH
+}
+
+// Execute a pending seek command
+func (cdrom *CdRom) DoSeek() {
+	// don't seek to track 1's pregap
+	if cdrom.SeekTarget.ToU32() < MsfFromBcd(0x00, 0x02, 0x00).ToU32() {
+		panicFmt("cdrom: attempted to seek to track 1's pregap (%s)", cdrom.SeekTarget)
+	}
+
+	cdrom.Position = cdrom.SeekTarget
+	cdrom.SeekTargetPending = false
+}
+
+// Test command, has a lot of subcommands
+func (cdrom *CdRom) CommandTest() {
+	paramsLen := cdrom.SubCpu.Params.Length()
+	if paramsLen != 1 {
+		panicFmt(
+			"cdrom: invalid amount of parameters for CommandTest (expected 1, got %d)",
+			paramsLen,
+		)
+	}
+
+	// TODO: implement other subcommands
+	param := cdrom.SubCpu.Params.Pop()
+	switch param {
+	case 0x20:
+		cdrom.TestVersion()
+	default:
+		panicFmt("cdrom: unhandled test subcommand 0x%x", param)
+	}
+}
+
+// Read table of contents
+func (cdrom *CdRom) CommandReadToc() {
+	cdrom.PushStatus()
+	// TODO: should this stop ReadN/ReadS?
+	cdrom.SubCpu.ScheduleAsyncResponse(cdrom.AsyncReadToc, TIMING_READTOC_ASYNC)
+}
+
+// Read table of contents
+func (cdrom *CdRom) AsyncReadToc() uint32 {
+	cdrom.PushStatus()
+	return TIMING_READTOC_RX_PUSH
+}
+
+// Responds with the CD-ROM identification string
+func (cdrom *CdRom) CommandGetId() {
+	if cdrom.Disc != nil {
+		cdrom.PushStatus()
+		cdrom.SubCpu.ScheduleAsyncResponse(cdrom.AsyncGetId, TIMING_GET_ID_ASYNC)
+	} else {
+		// no disc, pretend that the CD tray is open
+		cdrom.SubCpu.Response.Push(0x11)
+		cdrom.SubCpu.Response.Push(0x80)
+		cdrom.SubCpu.SetIrqCode(IRQ_CODE_ERROR)
+	}
+}
+
+// Asynchronous GetId response
+func (cdrom *CdRom) AsyncGetId() uint32 {
+	disc := cdrom.GetDiscOrPanic()
+
+	var regionByte byte
+	switch disc.Region {
+	case REGION_JAPAN:
+		regionByte = 'I'
+	case REGION_NORTH_AMERICA:
+		regionByte = 'A'
+	case REGION_EUROPE:
+		regionByte = 'E'
+	}
+
+	cdrom.SubCpu.Response.PushSlice([]byte{
+		0x00,                      // licensed, not audio
+		0x20,                      // disc type
+		0x00,                      // session info exists
+		'S', 'C', 'E', regionByte, // region string
+	})
+	return TIMING_GET_ID_RX_PUSH
+}
+
+// Responds with the CD-ROM version number
+func (cdrom *CdRom) TestVersion() {
+	cdrom.SubCpu.Response.Push(0x97) // year
+	cdrom.SubCpu.Response.Push(0x01) // month
+	cdrom.SubCpu.Response.Push(0x10) // day
+	cdrom.SubCpu.Response.Push(0xc2) // version
+}
+
+// Returns a disc, panics if it is nil
 func (cdrom *CdRom) GetDiscOrPanic() *Disc {
 	if cdrom.Disc == nil {
-		panic("cdrom: disc is nil")
+		panic("cdrom: no disc")
 	}
 	return cdrom.Disc
 }
 
-// Called when a sector has been read
-func (cdrom *CdRom) SectorRead(irqState *IrqState) {
-	position := cdrom.Position
-	disc := cdrom.GetDiscOrPanic()
-	fmt.Printf("cdrom: read sector %s\n", position)
+// Returns the first status byte of many commands
+func (cdrom *CdRom) DriveStatus() byte {
+	if cdrom.Disc != nil {
+		// disc inserted
+		var r byte
 
-	sector, err := disc.ReadDataSector(position)
-	if err != nil {
-		panicFmt("cdrom: failed to read sector %s", position)
-	}
-	cdrom.RxSector = sector
-
-	if cdrom.ReadWholeSector {
-		cdrom.RxOffset = 12
-		cdrom.RxLen = 2340
-	} else {
-		cdrom.RxOffset = 24
-		cdrom.RxLen = 2048
+		isReading := cdrom.ReadState.IsReading()
+		r |= 1 << 1 // motor on
+		r |= byte(oneIfTrue(isReading)) << 5
+		return r
 	}
 
-	if cdrom.IrqFlags == 0 {
-		cdrom.Response = NewFIFOFromBytes([]byte{cdrom.DriveStatus()})
-		cdrom.TriggerIrq(IRQ_CODE_SECTOR_READY, irqState)
-	}
-
-	cdrom.Position = cdrom.Position.Next()
+	// no disc, pretend that the CD tray is open
+	return 0x10
 }
 
-func (cdrom *CdRom) Config(conf uint8) {
-	prevActive := cdrom.RxActive
-	cdrom.RxActive = conf&0x80 != 0
-
-	if cdrom.RxActive {
-		if !prevActive {
-			// go to the beginning of the RX FIFO
-			cdrom.RxIndex = 0
-		}
-	} else {
-		// align to next multiple of 8 bytes
-		i := cdrom.RxIndex
-		adjust := (i & 4) << 1
-		cdrom.RxIndex = uint16(int32(i) & ^7) + adjust
-	}
-
-	if conf&0x7f != 0 {
-		panicFmt("cdrom: unhandled config 0x%x", conf)
-	}
+// Pushes the first status byte of many commands
+func (cdrom *CdRom) PushStatus() {
+	cdrom.SubCpu.Response.Push(cdrom.DriveStatus())
 }
 
-func (cdrom *CdRom) AckIdle() {
-	cdrom.IdleState()
+func (cdrom *CdRom) CyclesPerSector() uint32 {
+	return (CPU_FREQ_HZ / 75) >> oneIfTrue(cdrom.DoubleSpeed)
 }

@@ -43,14 +43,20 @@ func (fifo *FIFO) Clear() {
 }
 
 // Pushes a value to the FIFO
-func (fifo *FIFO) Push(val uint8) {
+func (fifo *FIFO) Push(val byte) {
 	fifo.Buffer[fifo.WritePtr&0xf] = val
 	fifo.WritePtr = (fifo.WritePtr + 1) & 0x1f
 }
 
+func (fifo *FIFO) PushSlice(data []byte) {
+	for _, b := range data {
+		fifo.Push(b)
+	}
+}
+
 // Increments the read pointer of the FIFO and returns the value at
 // that pointer
-func (fifo *FIFO) Pop() uint8 {
+func (fifo *FIFO) Pop() byte {
 	idx := fifo.ReadPtr & 0xf
 	fifo.ReadPtr = (fifo.ReadPtr + 1) & 0x1f
 	return fifo.Buffer[idx]

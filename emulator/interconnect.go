@@ -96,7 +96,7 @@ func (inter *Interconnect) Load(addr uint32, size AccessSize, th *TimeHandler) i
 		return accessSizeU32(size, 0)
 	}
 	if ok, offset := CDROM_RANGE.ContainsAndOffset(absAddr); ok {
-		return inter.CdRom.Load(th, inter.IrqState, size, offset)
+		return accessSizeU32(size, inter.CdRom.Load(offset, size, th, inter.IrqState))
 	}
 	if ok, offset := PADMEMCARD_RANGE.ContainsAndOffset(absAddr); ok {
 		return inter.PadMemCard.Load(th, inter.IrqState, offset, size)
@@ -482,10 +482,10 @@ func (inter *Interconnect) Sync(th *TimeHandler) {
 	if th.NeedsSync(PERIPHERAL_PADMEMCARD) {
 		inter.PadMemCard.Sync(th, inter.IrqState)
 	}
+	inter.Timers.Sync(th, inter.IrqState)
 	if th.NeedsSync(PERIPHERAL_CDROM) {
 		inter.CdRom.Sync(th, inter.IrqState)
 	}
-	inter.Timers.Sync(th, inter.IrqState)
 }
 
 // Load instruction at `pc`

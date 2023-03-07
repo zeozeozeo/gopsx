@@ -53,14 +53,17 @@ func (th *TimeHandler) SetNextSyncDelta(from Peripheral, delta uint64) {
 	}
 }
 
-func (th *TimeHandler) SetNextSyncDeltaIfCloser(from Peripheral, delta uint64) {
-	at := th.Cycles + delta
-	timesheet := th.TimeSheets[from]
-	nextSync := timesheet.NextSync
+func (th *TimeHandler) MaybeSetNextSync(from Peripheral, at uint64) {
+	sheet := th.TimeSheets[from]
 
-	if nextSync > at {
-		timesheet.NextSync = at
+	if sheet.NextSync > at {
+		sheet.NextSync = at
 	}
+}
+
+func (th *TimeHandler) MaybeSetNextSyncDelta(from Peripheral, delta uint64) {
+	at := th.Cycles + delta
+	th.MaybeSetNextSync(from, at)
 }
 
 // Called when there's no event scheduled

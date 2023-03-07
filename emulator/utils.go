@@ -135,6 +135,20 @@ func countLeadingZeroesU16(val uint16) uint16 {
 	return r
 }
 
+func absInt64(v int64) int64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func maxInt64(x, y int64) int64 {
+	if x > y {
+		return x
+	}
+	return y
+}
+
 func countLeadingZeroesU32(x uint32) uint32 {
 	var n uint32 = 32
 	var y uint32
