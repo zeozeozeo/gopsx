@@ -1,5 +1,13 @@
 # gopsx, a PlayStation 1 emulator written in Go
 
+# TODO
+
+-   MDEC
+-   SPU
+-   Fix the CD-ROM implementation
+-   Fix the GTE implementation (some of the tests fail)
+-   Correct CPU pipeline emulation
+
 # Usage
 
 1. Get a PlayStation 1 BIOS.
