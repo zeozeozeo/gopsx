@@ -31,11 +31,11 @@ Implemented:
 
 ## Images
 
-![Boot animation](https://cdn.discordapp.com/attachments/783966433641365504/1056906583193432094/image.png)
+![Boot animation](/media/bootanim.png)
 
-![BIOS main menu](https://cdn.discordapp.com/attachments/783966433641365504/1056906529271455804/image.png)
+![BIOS main menu](/media/biosmenu.png)
 
-![BIOS logo](https://cdn.discordapp.com/attachments/783966433641365504/1059423929770459146/image.png)
+![BIOS logo](/media/pslogo.png)
 
 # Other
 
